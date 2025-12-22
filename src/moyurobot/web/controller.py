@@ -349,16 +349,41 @@ def update_frame(camera_name: str, frame: np.ndarray):
         latest_frames[camera_name] = frame.copy()
 
 
-def run_server(host: str = "0.0.0.0", port: int = 8080, service=None, debug: bool = False):
+def run_server(host: str = "0.0.0.0", port: int = 8080, service=None, 
+               debug: bool = False, connect_robot: bool = True):
     """
     运行 Web 服务器
     
     Args:
         host: 监听地址
         port: 监听端口
-        service: 机器人服务实例
+        service: 机器人服务实例（如果为 None 则自动创建）
         debug: 是否启用调试模式
+        connect_robot: 是否自动连接机器人
     """
+    # 如果没有提供服务实例，创建默认服务
+    if service is None and connect_robot:
+        try:
+            from moyurobot.core.robot_service import create_default_service, set_global_service
+            
+            logger.info("创建机器人服务...")
+            service = create_default_service(robot_id="moyu_robot")
+            set_global_service(service)
+            
+            # 尝试连接机器人
+            logger.info("正在连接机器人...")
+            if service.connect():
+                logger.info("✓ 机器人连接成功")
+            else:
+                logger.warning("⚠️ 机器人连接失败，将以离线模式启动")
+                
+        except ImportError as e:
+            logger.warning(f"无法导入机器人服务模块: {e}")
+            logger.warning("将以离线模式启动（仅 Web 界面）")
+        except Exception as e:
+            logger.warning(f"机器人服务初始化失败: {e}")
+            logger.warning("将以离线模式启动")
+    
     app = create_app(service=service)
     
     logger.info(f"启动 Web 服务器: http://{host}:{port}")
@@ -367,5 +392,5 @@ def run_server(host: str = "0.0.0.0", port: int = 8080, service=None, debug: boo
 
 if __name__ == "__main__":
     # 测试运行
-    run_server(debug=True)
+    run_server(debug=True, connect_robot=True)
 

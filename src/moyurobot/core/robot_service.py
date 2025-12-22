@@ -472,6 +472,38 @@ class RobotService:
         """停止机器人"""
         return self.execute_predefined_command("stop")
     
+    def move(self, x: float, y: float, theta: float):
+        """
+        移动机器人
+        
+        Args:
+            x: 前后速度 (m/s)
+            y: 左右速度 (m/s)
+            theta: 旋转速度 (deg/s)
+        """
+        return self.execute_custom_velocity(x, y, theta)
+    
+    def reset_arm(self):
+        """重置机械臂到初始位置"""
+        initial_positions = {
+            "arm_shoulder_pan.pos": 0,
+            "arm_shoulder_lift.pos": 0,
+            "arm_elbow_flex.pos": 0,
+            "arm_wrist_flex.pos": 0,
+            "arm_wrist_roll.pos": 0,
+            "arm_gripper.pos": 50,  # 半开状态
+        }
+        return self.set_arm_position(initial_positions)
+    
+    def set_gripper(self, value: int):
+        """
+        设置夹爪开合度
+        
+        Args:
+            value: 0-100，0为完全关闭，100为完全打开
+        """
+        return self.set_arm_position({"arm_gripper.pos": value})
+    
     def _control_loop(self):
         """机器人控制主循环"""
         logger.info("机器人控制循环已启动")
