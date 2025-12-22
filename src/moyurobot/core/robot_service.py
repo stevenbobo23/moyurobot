@@ -202,8 +202,12 @@ class RobotService:
         
         return self._robot_class(robot_config)
     
-    def connect(self) -> bool:
-        """连接机器人"""
+    def connect(self, calibrate: bool = False) -> bool:
+        """连接机器人
+        
+        Args:
+            calibrate: 是否进行校准，默认 False（跳过校准）
+        """
         try:
             if self.robot and self.robot.is_connected:
                 logger.info("机器人已经连接")
@@ -216,7 +220,8 @@ class RobotService:
                 if self.robot is None:
                     return False
             
-            self.robot.connect()
+            # 跳过校准（calibrate=False）
+            self.robot.connect(calibrate=calibrate)
             
             # 读取当前机械臂位置
             current_state = self.robot.get_observation()
