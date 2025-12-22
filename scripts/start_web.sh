@@ -39,5 +39,5 @@ fi
 
 python -c "
 from moyurobot.web.controller import run_server
-run_server(host='0.0.0.0', port=8080, debug=True)
+run_server(host='0.0.0.0', port=8080, debug=False)
 "

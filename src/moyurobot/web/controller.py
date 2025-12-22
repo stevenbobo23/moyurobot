@@ -390,7 +390,8 @@ def run_server(host: str = "0.0.0.0", port: int = 8080, service=None,
     app = create_app(service=service)
     
     logger.info(f"启动 Web 服务器: http://{host}:{port}")
-    app.run(host=host, port=port, debug=debug, threaded=True)
+    # 禁用 reloader 避免重复连接机器人
+    app.run(host=host, port=port, debug=debug, threaded=True, use_reloader=False)
 
 
 if __name__ == "__main__":
