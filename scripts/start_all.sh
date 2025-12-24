@@ -103,20 +103,25 @@ start_web_controller() {
     export ROBOT_ID="${ROBOT_ID:-my_awesome_kiwi}"
     
     log_info "机器人ID: $ROBOT_ID"
+    log_info "启用 MCP HTTP 模式 (端口 8000)"
     
     # 记录日志
     echo "--- Starting new session $(date) ---" >> "$HOME/logs/moyurobot_web.log"
     
-    python -c "
-import os
-from moyurobot.web.controller import run_server
-robot_id = os.environ.get('ROBOT_ID', 'my_awesome_kiwi')
-run_server(host='0.0.0.0', port=8080, robot_id=robot_id)
-" >> "$HOME/logs/moyurobot_web.log" 2>&1 &
+    # 使用命令行参数启动，支持 --tuiliu 推流和 --mcp-mode http
+    python -m moyurobot.web.controller \
+        --robot-id "$ROBOT_ID" \
+        --host 0.0.0.0 \
+        --port 8080 \
+        --tuiliu \
+        --mcp-mode http \
+        --mcp-port 8000 \
+        >> "$HOME/logs/moyurobot_web.log" 2>&1 &
     WEB_PID=$!
     
     log_info "Web 控制器已启动 (PID: $WEB_PID)"
-    log_info "访问地址: http://localhost:8080"
+    log_info "Web 访问地址: http://localhost:8080"
+    log_info "MCP HTTP 地址: http://localhost:8000"
     log_info "日志文件: $HOME/logs/moyurobot_web.log"
 }
 

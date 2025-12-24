@@ -8,6 +8,7 @@
 - 人脸控制
 - 视频推流
 - 机械臂控制
+- MCP 服务支持（http/stdio 模式）
 """
 
 import logging
@@ -16,6 +17,7 @@ import sys
 import os
 import threading
 import uuid
+import subprocess
 
 # 添加项目根目录到路径
 if __name__ == "__main__":
@@ -30,6 +32,7 @@ from flask import Flask, jsonify, request, render_template, Response, make_respo
 app = None
 service = None
 logger = None
+mcp = None  # MCP 服务实例
 SESSION_COOKIE_NAME = "moyu_user_id"
 USERNAME_COOKIE_NAME = "moyu_username"
 SESSION_TIMEOUT_SECONDS = 100
@@ -38,8 +41,138 @@ _active_user = {"id": None, "start_time": 0.0, "username": None, "is_vip": False
 _waiting_users = []
 _active_user_lock = threading.Lock()
 
+# 推流配置
+STREAMING_ENABLED = False
+STREAM_URL = "rtmp://210004.push.tlivecloud.com/live/moyu?txSecret=5ac614a0d9b74d44260c5ac52e141aa0&txTime=6EF9CFBD"
+STREAM_ROTATE_180 = False
+_stream_process = None
+_stream_thread = None
+_stream_running = False
+_stream_lock = threading.Lock()
+
 # 运动控制开关，默认关闭（监控模式）
 _movement_enabled = False
+
+
+def start_streaming():
+    """启动视频推流"""
+    global _stream_process, _stream_thread, _stream_running, service, logger
+    
+    if not STREAMING_ENABLED:
+        if logger:
+            logger.info("推流功能已禁用，跳过启动")
+        return
+    
+    with _stream_lock:
+        if _stream_running:
+            logger.info("推流已在运行中")
+            return
+        
+        if not service or not service.robot.is_connected:
+            logger.warning("机器人未连接，无法启动推流")
+            return
+        
+        if 'wrist' not in service.robot.cameras:
+            logger.warning("手腕摄像头不可用，无法启动推流")
+            return
+        
+        _stream_running = True
+    
+    def stream_worker():
+        global _stream_process, _stream_running
+        try:
+            camera = service.robot.cameras['wrist']
+            
+            # 获取摄像头参数
+            sample_frame = camera.async_read(timeout_ms=1000)
+            if sample_frame is None:
+                logger.error("无法获取摄像头帧")
+                return
+            
+            height, width = sample_frame.shape[:2]
+            fps = 15
+            
+            # ffmpeg 命令
+            ffmpeg_cmd = [
+                'ffmpeg',
+                '-y',
+                '-f', 'rawvideo',
+                '-vcodec', 'rawvideo',
+                '-pix_fmt', 'bgr24',
+                '-s', f'{width}x{height}',
+                '-r', str(fps),
+                '-i', '-',
+                '-c:v', 'libx264',
+                '-preset', 'ultrafast',
+                '-tune', 'zerolatency',
+                '-pix_fmt', 'yuv420p',
+                '-f', 'flv',
+                STREAM_URL
+            ]
+            
+            logger.info(f"启动推流: {STREAM_URL[:50]}...")
+            _stream_process = subprocess.Popen(
+                ffmpeg_cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            
+            frame_interval = 1.0 / fps
+            last_frame_time = 0
+            
+            while _stream_running:
+                try:
+                    now = time.time()
+                    if now - last_frame_time < frame_interval:
+                        time.sleep(0.001)
+                        continue
+                    
+                    frame = camera.async_read(timeout_ms=100)
+                    if frame is not None:
+                        # RGB -> BGR
+                        frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                        
+                        if STREAM_ROTATE_180:
+                            frame_bgr = cv2.rotate(frame_bgr, cv2.ROTATE_180)
+                        
+                        _stream_process.stdin.write(frame_bgr.tobytes())
+                        last_frame_time = now
+                    else:
+                        time.sleep(0.01)
+                        
+                except Exception as e:
+                    logger.error(f"推流帧错误: {e}")
+                    break
+                    
+        except Exception as e:
+            logger.error(f"推流线程错误: {e}")
+        finally:
+            stop_streaming()
+    
+    _stream_thread = threading.Thread(target=stream_worker, daemon=True)
+    _stream_thread.start()
+    logger.info("推流线程已启动")
+
+
+def stop_streaming():
+    """停止视频推流"""
+    global _stream_process, _stream_running
+    
+    with _stream_lock:
+        _stream_running = False
+        
+        if _stream_process:
+            try:
+                _stream_process.stdin.close()
+                _stream_process.terminate()
+                _stream_process.wait(timeout=5)
+            except:
+                pass
+            _stream_process = None
+            
+    if logger:
+        logger.info("推流已停止")
 
 
 def setup_routes():
@@ -461,9 +594,17 @@ def setup_routes():
         })
 
 
-def run_server(host="0.0.0.0", port=8080, robot_id="my_awesome_kiwi"):
-    """启动HTTP服务器"""
-    global app, service, logger
+def run_server(host="0.0.0.0", port=8080, robot_id="my_awesome_kiwi", mcp_mode=None, mcp_port=8000):
+    """启动HTTP服务器，可选同时启动MCP服务
+    
+    Args:
+        host: 服务器主机地址
+        port: HTTP服务器端口
+        robot_id: 机器人ID
+        mcp_mode: MCP模式 ('http' 或 'stdio')，None表示不启用MCP
+        mcp_port: MCP HTTP服务器端口（仅在mcp_mode='http'时有效）
+    """
+    global app, service, logger, mcp
     
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
@@ -491,28 +632,65 @@ def run_server(host="0.0.0.0", port=8080, robot_id="my_awesome_kiwi"):
         logger.warning(f"创建机器人服务失败: {e}")
         service = None
     
+    # 如果启用MCP模式，导入MCP服务
+    if mcp_mode:
+        try:
+            from moyurobot.mcp.server import mcp as mcp_server
+            mcp = mcp_server
+            logger.info(f"MCP 服务已加载，模式: {mcp_mode}")
+        except ImportError as e:
+            logger.error(f"无法导入MCP服务模块: {e}")
+            mcp = None
+    
     # 设置路由
     setup_routes()
     
     logger.info(f"正在启动摸鱼遥控车 HTTP 控制器，地址: http://{host}:{port}")
+    if mcp_mode:
+        logger.info(f"MCP 模式: {mcp_mode}, MCP 端口: {mcp_port if mcp_mode == 'http' else 'N/A'}")
     
     # 启动时自动连接机器人
     if service:
         if service.connect():
             logger.info("✓ 机器人连接成功")
+            # 连接成功后启动推流
+            if STREAMING_ENABLED:
+                start_streaming()
         else:
             logger.warning("⚠️ 机器人连接失败，将以离线模式启动HTTP服务")
     
     logger.info("使用浏览器访问控制界面，或通过API发送控制命令")
     
+    # 定义Flask运行函数
+    def run_flask():
+        try:
+            app.run(
+                host=host,
+                port=port,
+                debug=False,
+                threaded=True,
+                use_reloader=False
+            )
+        except Exception as e:
+            logger.error(f"HTTP服务启动失败: {e}")
+
     try:
-        app.run(
-            host=host,
-            port=port,
-            debug=False,
-            threaded=True,
-            use_reloader=False
-        )
+        if mcp_mode and mcp:
+            # 在后台线程启动Flask
+            flask_thread = threading.Thread(target=run_flask, daemon=True)
+            flask_thread.start()
+            
+            # 在主线程运行MCP
+            logger.info(f"Starting MCP server in {mcp_mode} mode")
+            if mcp_mode == "http":
+                mcp.run(transport="http", host=host, port=mcp_port)
+            else:
+                # stdio mode
+                mcp.run(transport="stdio")
+        else:
+            # 仅运行Flask（主线程）
+            run_flask()
+            
     except KeyboardInterrupt:
         logger.info("收到中断信号，正在关闭...")
     finally:
@@ -522,6 +700,7 @@ def run_server(host="0.0.0.0", port=8080, robot_id="my_awesome_kiwi"):
 def cleanup():
     """清理资源"""
     global service
+    stop_streaming()
     if service:
         service.disconnect()
 
@@ -548,25 +727,85 @@ if __name__ == "__main__":
         default=8080,
         help="服务器端口（默认: 8080）"
     )
+    parser.add_argument(
+        "--enable-stream",
+        action="store_true",
+        help="启用 RTMP 视频推流"
+    )
+    parser.add_argument(
+        "--stream-url",
+        type=str,
+        default=STREAM_URL,
+        help="RTMP 推流地址"
+    )
+    parser.add_argument(
+        "--rotate-180",
+        action="store_true",
+        help="将推流画面旋转 180 度"
+    )
+    parser.add_argument(
+        "--tuiliu",
+        action="store_true",
+        help="一键开启推流（使用默认配置）"
+    )
+    parser.add_argument(
+        "--mcp-mode",
+        type=str,
+        choices=['stdio', 'http'],
+        default=None,
+        help="启用MCP服务器模式：stdio或http"
+    )
+    parser.add_argument(
+        "--mcp-port",
+        type=int,
+        default=8000,
+        help="MCP服务器HTTP端口（仅在mcp-mode=http时有效）"
+    )
     
     args = parser.parse_args()
     
-    print("=== 摸鱼遥控车 HTTP 控制器 ===")
-    print(f"机器人 ID: {args.robot_id}")
-    print(f"服务地址: http://{args.host}:{args.port}")
-    print("功能特性:")
-    print("  - 网页控制界面")
-    print("  - REST API 接口")
-    print("  - 排队系统")
-    print("  - 手势/人脸控制")
-    print("  - 键盘控制支持")
-    print("按 Ctrl+C 停止服务")
-    print("=========================")
+    # 应用推流配置
+    if args.enable_stream or args.tuiliu:
+        STREAMING_ENABLED = True
+    if args.stream_url:
+        STREAM_URL = args.stream_url
+    if args.rotate_180:
+        STREAM_ROTATE_180 = True
+    elif args.tuiliu:
+        STREAM_ROTATE_180 = False
+    
+    # 如果不是stdio模式，才打印欢迎信息到stdout
+    # stdio模式下，stdout被用于MCP通信，不能打印杂乱信息
+    if args.mcp_mode != 'stdio':
+        print("=== 摸鱼遥控车 HTTP 控制器 ===")
+        print(f"机器人 ID: {args.robot_id}")
+        print(f"服务地址: http://{args.host}:{args.port}")
+        if args.mcp_mode:
+            print(f"MCP 模式: {args.mcp_mode}")
+            if args.mcp_mode == 'http':
+                print(f"MCP 端口: {args.mcp_port}")
+        print("功能特性:")
+        print("  - 网页控制界面")
+        print("  - REST API 接口")
+        print("  - 排队系统")
+        print("  - 手势/人脸控制")
+        print("  - 键盘控制支持")
+        if args.mcp_mode:
+            print("  - MCP 服务支持")
+        if STREAMING_ENABLED:
+            print("  - RTMP 视频推流")
+        print("按 Ctrl+C 停止服务")
+        print("=========================")
     
     try:
-        run_server(args.host, args.port, args.robot_id)
+        run_server(args.host, args.port, args.robot_id, args.mcp_mode, args.mcp_port)
     except KeyboardInterrupt:
-        print("\n收到键盘中断，正在关闭服务...")
+        if args.mcp_mode != 'stdio':
+            print("\n收到键盘中断，正在关闭服务...")
     except Exception as e:
-        print(f"\n启动失败: {e}")
+        if args.mcp_mode == 'stdio':
+            import sys
+            sys.stderr.write(f"启动失败: {e}\n")
+        else:
+            print(f"\n启动失败: {e}")
 
