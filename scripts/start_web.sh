@@ -38,6 +38,8 @@ else
 fi
 
 python -c "
+import os
 from moyurobot.web.controller import run_server
-run_server(host='0.0.0.0', port=8080, debug=False)
+robot_id = os.environ.get('ROBOT_ID', 'my_awesome_kiwi')
+run_server(host='0.0.0.0', port=8080, robot_id=robot_id)
 "

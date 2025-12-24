@@ -1,8 +1,9 @@
 """Web 控制模块"""
 
-from .controller import create_app
+from .controller import run_server, setup_routes
 
 __all__ = [
-    "create_app",
+    "run_server",
+    "setup_routes",
 ]
 
