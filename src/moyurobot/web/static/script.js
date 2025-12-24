@@ -21,7 +21,7 @@ function updateStatus() {
 
 // 错误提醒控制变量
 let lastErrorAlertTime = 0;
-const ERROR_ALERT_INTERVAL = 50000; // 5秒内只弹一次窗
+const ERROR_ALERT_INTERVAL = 50000; // 50秒内只弹一次窗
 
 function sendCommand(command, silent = false) {
     const requestBody = {command: command};

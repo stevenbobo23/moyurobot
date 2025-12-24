@@ -818,7 +818,10 @@ def capture_and_analyze_with_qwen(question: str = "") -> dict:
             image_base64 = base64.b64encode(image_data).decode('utf-8')
         
         api_url = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-        api_key = "sk-d7ca1868a1ee4077aa225aa49bc8cf41"
+        api_key = os.environ.get("QWEN_API_KEY")
+        
+        if not api_key:
+            return {"success": False, "error": "未配置 QWEN_API_KEY 环境变量"}
         
         headers = {
             "Authorization": f"Bearer {api_key}",

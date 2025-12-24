@@ -18,6 +18,7 @@ setup(
         "moyurobot.web": ["templates/*.html", "static/*.css", "static/*.js"],
     },
     install_requires=[
+        "lerobot",  # 核心依赖，来自 https://github.com/huggingface/lerobot
         "flask>=2.3.0",
         "flask-cors>=4.0.0",
         "fastmcp>=0.1.0",

@@ -17,7 +17,6 @@ import sys
 import os
 import threading
 import uuid
-import subprocess
 
 # 添加项目根目录到路径
 if __name__ == "__main__":
@@ -28,151 +27,24 @@ if __name__ == "__main__":
 import cv2
 from flask import Flask, jsonify, request, render_template, Response, make_response, redirect, url_for
 
+# 导入拆分出的模块
+from moyurobot.web.session import (
+    session_manager, 
+    SESSION_COOKIE_NAME, 
+    USERNAME_COOKIE_NAME,
+    SESSION_TIMEOUT_SECONDS,
+    VIP_SESSION_TIMEOUT_SECONDS
+)
+from moyurobot.web import streaming
+
 # 全局变量
 app = None
 service = None
 logger = None
 mcp = None  # MCP 服务实例
-SESSION_COOKIE_NAME = "moyu_user_id"
-USERNAME_COOKIE_NAME = "moyu_username"
-SESSION_TIMEOUT_SECONDS = 100
-VIP_SESSION_TIMEOUT_SECONDS = 600  # VIP 用户超时时间：10 分钟
-_active_user = {"id": None, "start_time": 0.0, "username": None, "is_vip": False}
-_waiting_users = []
-_active_user_lock = threading.Lock()
-
-# 推流配置
-STREAMING_ENABLED = False
-STREAM_URL = "rtmp://210004.push.tlivecloud.com/live/moyu?txSecret=5ac614a0d9b74d44260c5ac52e141aa0&txTime=6EF9CFBD"
-STREAM_ROTATE_180 = False
-_stream_process = None
-_stream_thread = None
-_stream_running = False
-_stream_lock = threading.Lock()
 
 # 运动控制开关，默认关闭（监控模式）
 _movement_enabled = False
-
-
-def start_streaming():
-    """启动视频推流"""
-    global _stream_process, _stream_thread, _stream_running, service, logger
-    
-    if not STREAMING_ENABLED:
-        if logger:
-            logger.info("推流功能已禁用，跳过启动")
-        return
-    
-    with _stream_lock:
-        if _stream_running:
-            logger.info("推流已在运行中")
-            return
-        
-        if not service or not service.robot.is_connected:
-            logger.warning("机器人未连接，无法启动推流")
-            return
-        
-        if 'wrist' not in service.robot.cameras:
-            logger.warning("手腕摄像头不可用，无法启动推流")
-            return
-        
-        _stream_running = True
-    
-    def stream_worker():
-        global _stream_process, _stream_running
-        try:
-            camera = service.robot.cameras['wrist']
-            
-            # 获取摄像头参数
-            sample_frame = camera.async_read(timeout_ms=1000)
-            if sample_frame is None:
-                logger.error("无法获取摄像头帧")
-                return
-            
-            height, width = sample_frame.shape[:2]
-            fps = 15
-            
-            # ffmpeg 命令
-            ffmpeg_cmd = [
-                'ffmpeg',
-                '-y',
-                '-f', 'rawvideo',
-                '-vcodec', 'rawvideo',
-                '-pix_fmt', 'bgr24',
-                '-s', f'{width}x{height}',
-                '-r', str(fps),
-                '-i', '-',
-                '-c:v', 'libx264',
-                '-preset', 'ultrafast',
-                '-tune', 'zerolatency',
-                '-pix_fmt', 'yuv420p',
-                '-f', 'flv',
-                STREAM_URL
-            ]
-            
-            logger.info(f"启动推流: {STREAM_URL[:50]}...")
-            _stream_process = subprocess.Popen(
-                ffmpeg_cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            
-            frame_interval = 1.0 / fps
-            last_frame_time = 0
-            
-            while _stream_running:
-                try:
-                    now = time.time()
-                    if now - last_frame_time < frame_interval:
-                        time.sleep(0.001)
-                        continue
-                    
-                    frame = camera.async_read(timeout_ms=100)
-                    if frame is not None:
-                        # RGB -> BGR
-                        frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                        
-                        if STREAM_ROTATE_180:
-                            frame_bgr = cv2.rotate(frame_bgr, cv2.ROTATE_180)
-                        
-                        _stream_process.stdin.write(frame_bgr.tobytes())
-                        last_frame_time = now
-                    else:
-                        time.sleep(0.01)
-                        
-                except Exception as e:
-                    logger.error(f"推流帧错误: {e}")
-                    break
-                    
-        except Exception as e:
-            logger.error(f"推流线程错误: {e}")
-        finally:
-            stop_streaming()
-    
-    _stream_thread = threading.Thread(target=stream_worker, daemon=True)
-    _stream_thread.start()
-    logger.info("推流线程已启动")
-
-
-def stop_streaming():
-    """停止视频推流"""
-    global _stream_process, _stream_running
-    
-    with _stream_lock:
-        _stream_running = False
-        
-        if _stream_process:
-            try:
-                _stream_process.stdin.close()
-                _stream_process.terminate()
-                _stream_process.wait(timeout=5)
-            except:
-                pass
-            _stream_process = None
-            
-    if logger:
-        logger.info("推流已停止")
 
 
 def setup_routes():
@@ -186,51 +58,24 @@ def setup_routes():
         if not username:
             return redirect(url_for('login'))
 
-        user_id = request.cookies.get(SESSION_COOKIE_NAME)
-        now = time.time()
-
-        with _active_user_lock:
-            active_id = _active_user["id"]
-            active_start = _active_user["start_time"]
-            active_is_vip = _active_user.get("is_vip", False)
-            has_active = active_id is not None and active_start > 0
-            
-            # 根据是否是 VIP 选择超时时间
-            timeout_seconds = VIP_SESSION_TIMEOUT_SECONDS if active_is_vip else SESSION_TIMEOUT_SECONDS
-            elapsed = now - active_start if has_active else 0
-            is_active = has_active and elapsed < timeout_seconds
-            current_owner = _active_user.get("username")
-
-            if is_active and user_id != active_id:
-                if username and username not in _waiting_users:
-                    _waiting_users.append(username)
-                waiting_view = [u for u in _waiting_users if u != current_owner]
-                remaining_seconds = max(0, int(timeout_seconds - elapsed))
-                return (
-                    render_template(
-                        "waiting.html",
-                        current_owner=current_owner,
-                        waiting_users=waiting_view,
-                        requesting_user=username,
-                        remaining_seconds=remaining_seconds,
-                        session_timeout=timeout_seconds,
-                    ),
-                    429,
-                    {"Content-Type": "text/html; charset=utf-8"},
-                )
-
-            if not is_active:
-                user_id = user_id or str(uuid.uuid4())
-                _active_user["id"] = user_id
-                _active_user["username"] = username
-                _active_user["start_time"] = now
-                _active_user["is_vip"] = False  # 普通用户
-                if username in _waiting_users:
-                    _waiting_users.remove(username)
-            elif user_id == _active_user["id"]:
-                _active_user["username"] = username
-                if username in _waiting_users:
-                    _waiting_users.remove(username)
+        user_id = request.cookies.get(SESSION_COOKIE_NAME) or str(uuid.uuid4())
+        
+        # 尝试获取控制权
+        if not session_manager.try_acquire_control(user_id, username, is_vip=False):
+            # 需要排队
+            wait_info = session_manager.get_waiting_info(username)
+            return (
+                render_template(
+                    "waiting.html",
+                    current_owner=wait_info["current_owner"],
+                    waiting_users=wait_info["waiting_users"],
+                    requesting_user=username,
+                    remaining_seconds=wait_info["remaining_seconds"],
+                    session_timeout=wait_info["session_timeout"],
+                ),
+                429,
+                {"Content-Type": "text/html; charset=utf-8"},
+            )
 
         response = make_response(render_template('index.html', username=username))
         response.set_cookie(
@@ -250,16 +95,9 @@ def setup_routes():
             return redirect(url_for('login'))
 
         user_id = request.cookies.get(SESSION_COOKIE_NAME) or str(uuid.uuid4())
-        now = time.time()
-
-        with _active_user_lock:
-            _active_user["id"] = user_id
-            _active_user["username"] = username
-            _active_user["start_time"] = now
-            _active_user["is_vip"] = True
-            
-            if username in _waiting_users:
-                _waiting_users.remove(username)
+        
+        # VIP 用户强制获取控制权
+        session_manager.try_acquire_control(user_id, username, is_vip=True)
 
         response = make_response(render_template('index.html', username=username))
         response.set_cookie(
@@ -278,34 +116,17 @@ def setup_routes():
         if not username:
             return redirect(url_for('login'))
         
-        user_id = request.cookies.get(SESSION_COOKIE_NAME)
-        now = time.time()
-        
-        with _active_user_lock:
-            active_id = _active_user["id"]
-            active_start = _active_user["start_time"]
-            active_is_vip = _active_user.get("is_vip", False)
-            has_active = active_id is not None and active_start > 0
-            
-            timeout_seconds = VIP_SESSION_TIMEOUT_SECONDS if active_is_vip else SESSION_TIMEOUT_SECONDS
-            elapsed = now - active_start if has_active else 0
-            is_active = has_active and elapsed < timeout_seconds
-            current_owner = _active_user.get("username")
-            
-            if is_active and user_id != active_id:
-                if username and username not in _waiting_users:
-                    _waiting_users.append(username)
-            
-            waiting_view = [u for u in _waiting_users if u != current_owner]
-            remaining_seconds = max(0, int(timeout_seconds - elapsed)) if is_active else 0
+        # 添加到等待列表
+        session_manager.add_to_waiting_list(username)
+        wait_info = session_manager.get_waiting_info(username)
         
         return render_template(
             "waiting.html",
-            current_owner=current_owner if is_active else None,
-            waiting_users=waiting_view,
+            current_owner=wait_info["current_owner"],
+            waiting_users=wait_info["waiting_users"],
             requesting_user=username,
-            remaining_seconds=remaining_seconds,
-            session_timeout=timeout_seconds,
+            remaining_seconds=wait_info["remaining_seconds"],
+            session_timeout=wait_info["session_timeout"],
         )
     
     @app.route('/login', methods=['GET', 'POST'])
@@ -335,58 +156,23 @@ def setup_routes():
         user_id = request.cookies.get(SESSION_COOKIE_NAME)
         username = request.cookies.get(USERNAME_COOKIE_NAME)
         
-        with _active_user_lock:
-            active_id = _active_user["id"]
-            
-            if user_id == active_id:
-                _active_user["id"] = None
-                _active_user["start_time"] = 0.0
-                _active_user["username"] = None
-                _active_user["is_vip"] = False
-                
-                if username and username in _waiting_users:
-                    _waiting_users.remove(username)
-                
-                logger.info(f"用户 {username} 已退出控制")
-                return jsonify({
-                    "success": True,
-                    "message": "已退出控制"
-                })
-            else:
-                return jsonify({
-                    "success": False,
-                    "message": "您不是当前活跃用户，无法退出控制"
-                }), 403
+        if session_manager.release_control(user_id):
+            logger.info(f"用户 {username} 已退出控制")
+            return jsonify({
+                "success": True,
+                "message": "已退出控制"
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "message": "您不是当前活跃用户，无法退出控制"
+            }), 403
 
     @app.route('/session_info', methods=['GET'])
     def session_info():
         """获取当前会话占用信息"""
         user_id = request.cookies.get(SESSION_COOKIE_NAME)
-        now = time.time()
-
-        with _active_user_lock:
-            active_id = _active_user["id"]
-            active_start = _active_user["start_time"]
-            active_username = _active_user.get("username")
-            active_is_vip = _active_user.get("is_vip", False)
-            waiting_view = [u for u in _waiting_users if u != active_username]
-
-            has_active = active_id is not None and active_start > 0
-            elapsed = now - active_start if has_active else 0
-            
-            timeout_seconds = VIP_SESSION_TIMEOUT_SECONDS if active_is_vip else SESSION_TIMEOUT_SECONDS
-            is_active = has_active and elapsed < timeout_seconds
-            remaining = timeout_seconds - elapsed if is_active else 0
-            is_current_user = is_active and user_id == active_id
-
-        return jsonify({
-            "is_active_user": bool(is_current_user),
-            "remaining_seconds": max(0, int(remaining if is_current_user else 0)),
-            "current_owner": active_username if is_active else None,
-            "session_timeout": timeout_seconds,
-            "is_vip": active_is_vip if is_active else False,
-            "waiting_users": waiting_view,
-        })
+        return jsonify(session_manager.get_session_info(user_id))
 
     @app.route('/status', methods=['GET'])
     def get_status():
@@ -421,7 +207,7 @@ def setup_routes():
         try:
             if service:
                 service.stop_robot()
-        except:
+        except Exception:
             pass
         logger.info("收到 /stopmove 请求，已禁用运动控制")
         return jsonify({
@@ -617,8 +403,12 @@ def run_server(host="0.0.0.0", port=8080, robot_id="my_awesome_kiwi", mcp_mode=N
                 template_folder=template_dir,
                 static_folder=static_dir)
     
-    # 设置 secret key
-    app.secret_key = os.environ.get("FLASK_SECRET_KEY", "moyu_robot_secret_key")
+    # 设置 secret key（生产环境必须通过环境变量配置）
+    app.secret_key = os.environ.get("FLASK_SECRET_KEY")
+    if not app.secret_key:
+        import secrets
+        app.secret_key = secrets.token_hex(32)
+        logger.warning("⚠️ 未配置 FLASK_SECRET_KEY，使用随机生成的密钥（重启后会话将失效）")
     
     # 创建服务实例
     try:
@@ -654,8 +444,7 @@ def run_server(host="0.0.0.0", port=8080, robot_id="my_awesome_kiwi", mcp_mode=N
         if service.connect():
             logger.info("✓ 机器人连接成功")
             # 连接成功后启动推流
-            if STREAMING_ENABLED:
-                start_streaming()
+            streaming.start_streaming(service)
         else:
             logger.warning("⚠️ 机器人连接失败，将以离线模式启动HTTP服务")
     
@@ -700,7 +489,7 @@ def run_server(host="0.0.0.0", port=8080, robot_id="my_awesome_kiwi", mcp_mode=N
 def cleanup():
     """清理资源"""
     global service
-    stop_streaming()
+    streaming.stop_streaming()
     if service:
         service.disconnect()
 
@@ -735,8 +524,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--stream-url",
         type=str,
-        default=STREAM_URL,
-        help="RTMP 推流地址"
+        default=None,
+        help="RTMP 推流地址（也可通过 RTMP_STREAM_URL 环境变量配置）"
     )
     parser.add_argument(
         "--rotate-180",
@@ -764,15 +553,17 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    # 应用推流配置
+    # 应用推流配置（命令行参数优先于环境变量）
     if args.enable_stream or args.tuiliu:
-        STREAMING_ENABLED = True
+        streaming.update_config(enabled=True)
     if args.stream_url:
-        STREAM_URL = args.stream_url
+        streaming.update_config(url=args.stream_url)
     if args.rotate_180:
-        STREAM_ROTATE_180 = True
-    elif args.tuiliu:
-        STREAM_ROTATE_180 = False
+        streaming.update_config(rotate=True)
+    
+    # 推流启用但未配置 URL 时警告
+    if streaming.STREAMING_ENABLED and not streaming.STREAM_URL:
+        print("⚠️ 推流已启用但未配置 RTMP_STREAM_URL，推流功能将无法使用")
     
     # 如果不是stdio模式，才打印欢迎信息到stdout
     # stdio模式下，stdout被用于MCP通信，不能打印杂乱信息
@@ -792,7 +583,7 @@ if __name__ == "__main__":
         print("  - 键盘控制支持")
         if args.mcp_mode:
             print("  - MCP 服务支持")
-        if STREAMING_ENABLED:
+        if streaming.STREAMING_ENABLED:
             print("  - RTMP 视频推流")
         print("按 Ctrl+C 停止服务")
         print("=========================")

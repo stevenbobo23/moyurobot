@@ -16,26 +16,10 @@ from typing import Dict, Any, Optional
 
 import numpy as np
 
+# 从 config 模块导入配置类（避免重复定义）
+from moyurobot.core.config import RobotServiceConfig
+
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class RobotServiceConfig:
-    """机器人服务配置"""
-    robot_id: str = "moyu_robot"
-    # 移动速度配置 (m/s 和 deg/s)
-    linear_speed: float = 0.2
-    angular_speed: float = 30.0
-    # 机械臂舵机速度配置 (0.0-1.0，相对于最大速度的百分比)
-    arm_servo_speed: float = 0.2
-    # 机械臂扭矩限制 (0-1000，默认600)
-    arm_torque_limit: int = 600
-    # 安全配置
-    command_timeout_s: float = 6.0
-    max_loop_freq_hz: int = 30
-    # 摄像头配置
-    front_camera_name: str = "T1 Webcam"
-    wrist_camera_name: str = "USB Camera"
 
 
 def find_camera_by_name(camera_name: str) -> Optional[str]:

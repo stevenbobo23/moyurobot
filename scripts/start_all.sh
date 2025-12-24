@@ -81,6 +81,14 @@ check_dependencies() {
     
     cd "$PROJECT_ROOT"
     
+    # 检查 lerobot（核心依赖，来自 https://github.com/huggingface/lerobot）
+    python -c "import lerobot" 2>/dev/null || {
+        log_error "lerobot 未安装！这是核心依赖。"
+        log_info "请先安装 lerobot: pip install lerobot"
+        log_info "详见: https://github.com/huggingface/lerobot"
+        exit 1
+    }
+    
     python -c "import flask" 2>/dev/null || {
         log_warn "Flask 未安装，正在安装..."
         pip install flask flask-cors
@@ -91,13 +99,14 @@ check_dependencies() {
         pip install fastmcp
     }
     
-    # 检查 mcp_proxy（用于连接 HTTP MCP 服务器）
-    python -c "import mcp_proxy" 2>/dev/null || {
-        log_warn "mcp_proxy 未安装，正在安装..."
-        pip install mcp-proxy 2>/dev/null || {
-            log_warn "mcp-proxy 安装失败，MCP 管道服务可能无法连接到 HTTP 服务器"
-            log_warn "可以尝试: pip install mcp-proxy 或使用 stdio 模式"
-        }
+    python -c "import websockets" 2>/dev/null || {
+        log_warn "websockets 未安装，正在安装..."
+        pip install websockets
+    }
+    
+    python -c "import dotenv" 2>/dev/null || {
+        log_warn "python-dotenv 未安装，正在安装..."
+        pip install python-dotenv
     }
 }
 
