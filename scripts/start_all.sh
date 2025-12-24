@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # ============================================
 # 摸鱼遥控车 - 一键启动脚本
@@ -10,30 +10,23 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# 颜色定义
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# 日志函数
+# 日志函数 (兼容 sh)
 log_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
+    printf "[INFO] %s\n" "$1"
 }
 
 log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
+    printf "[WARN] %s\n" "$1"
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    printf "[ERROR] %s\n" "$1"
 }
 
 log_header() {
-    echo -e "\n${BLUE}========================================${NC}"
-    echo -e "${BLUE}  $1${NC}"
-    echo -e "${BLUE}========================================${NC}\n"
+    printf "\n========================================\n"
+    printf "  %s\n" "$1"
+    printf "========================================\n\n"
 }
 
 # 清理函数
@@ -54,7 +47,7 @@ trap cleanup INT TERM
 check_python() {
     log_info "检查 Python 环境..."
     
-    if ! command -v python &> /dev/null; then
+    if ! command -v python >/dev/null 2>&1; then
         log_error "未找到 Python，请先安装 Python 3.10+"
         exit 1
     fi
