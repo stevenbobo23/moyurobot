@@ -1,22 +1,25 @@
 # 摸鱼遥控车 - 依赖列表
+# ========================================
 
-# Web 框架
+# === 核心依赖（必须先安装）===
+# LeRobot 机器人控制框架
+# 安装方式: pip install lerobot
+# 如需 LeKiwi 支持: pip install lerobot[lekiwi]
+# 详见: https://github.com/huggingface/lerobot
+lerobot>=0.1.0
+
+# === Web 框架 ===
 flask>=2.3.0
 flask-cors>=4.0.0
 
-# MCP 协议
+# === MCP 协议 ===
 fastmcp>=0.1.0
 websockets>=11.0
 
-# 视觉处理
+# === 视觉处理 ===
 opencv-python>=4.8.0
 numpy>=1.24.0
 
-# 工具库
+# === 工具库 ===
 python-dotenv>=1.0.0
 requests>=2.31.0
-
-# LeRobot 依赖（可选，用于机器人控制）
-# torch>=2.0.0
-# lerobot @ git+https://github.com/huggingface/lerobot.git
-

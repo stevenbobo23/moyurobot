@@ -1,127 +1,145 @@
 # 🐟 摸鱼遥控车 (MoYu Robot)
 
-基于 MCP (Model Context Protocol) 的智能机器人控制平台，支持 AI 控制、Web 遥控、手势控制和人脸追踪。
+基于 [LeRobot](https://github.com/huggingface/lerobot) 和 MCP (Model Context Protocol) 的智能机器人控制平台，支持 AI 控制、Web 遥控、手势控制和人脸追踪。
 
 ## ✨ 功能特性
 
-- 🤖 **MCP AI 控制**: 通过 MCP 协议与 AI 模型（如 Claude）集成，实现自然语言控制
-- 🌐 **Web 控制界面**: 响应式 Web 界面，支持桌面和移动设备
+- 🤖 **MCP AI 控制**: 通过 MCP 协议与 AI 模型（如 Claude、小智 AI）集成，实现自然语言控制机器人
+- 🌐 **Web 控制界面**: 响应式 Web 界面，支持桌面和移动设备，内置排队系统
 - 🎮 **多种控制模式**:
-  - 手柄模式：方向键/WASD 控制
-  - 手势模式：MediaPipe 手势识别
-  - 人脸追踪：自动追踪人脸
-- 📹 **实时视频推流**: 支持多摄像头视频流
+  - 键盘控制：WASD / QE 方向控制
+  - 手势控制：MediaPipe 手势识别
+  - 人脸追踪：自动追踪人脸方向
+- 🦾 **机械臂控制**: 6 自由度机械臂精确控制
+- 📹 **实时视频**: 多摄像头 MJPEG 视频流 + RTMP 推流支持
 - 🔗 **远程连接**: WebSocket 管道支持远程 AI 控制
+
+## 🔧 硬件要求
+
+本项目基于 LeRobot 的 **LeKiwi** 移动机械臂机器人：
+
+- **LeKiwi 机器人**：三轮全向移动底盘 + 6DOF 机械臂
+- **摄像头**：
+  - 前置摄像头（推荐 T1 Webcam）
+  - 手腕摄像头（推荐 USB Camera）
+- **运行环境**：树莓派 / Linux PC
+
+> 详见 LeRobot 硬件文档：https://github.com/huggingface/lerobot/tree/main/examples/10_use_so100
 
 ## 📁 项目结构
 
 ```
 moyurobot/
-├── src/
-│   └── moyurobot/
-│       ├── core/              # 核心服务
-│       │   ├── config.py      # 配置管理
-│       │   └── robot_service.py  # 机器人服务
-│       ├── mcp/               # MCP 相关
-│       │   ├── server.py      # MCP 服务器
-│       │   └── pipe.py        # WebSocket 管道
-│       ├── web/               # Web 控制器
-│       │   ├── controller.py  # 主控制器
-│       │   ├── session.py     # 会话管理
-│       │   ├── streaming.py   # 视频推流
-│       │   ├── templates/     # HTML 模板
-│       │   └── static/        # 静态资源
-│       └── tools/             # 工具模块
-├── config/                    # 配置文件
-│   ├── default.json          # 默认配置
-│   ├── env.example           # 环境变量模板
-│   └── mcp_config.json       # MCP 配置
-├── scripts/                  # 启动脚本
-│   ├── start_all.sh         # 一键启动
-│   ├── start_mcp.sh         # MCP 服务
-│   ├── start_web.sh         # Web 服务
-│   └── start_pipe.sh        # 管道服务
-└── tests/                    # 测试文件
+├── src/moyurobot/
+│   ├── core/              # 核心服务
+│   │   ├── config.py      # 配置管理
+│   │   └── robot_service.py  # 机器人服务封装
+│   ├── mcp/               # MCP AI 控制
+│   │   ├── server.py      # MCP 工具服务器
+│   │   └── pipe.py        # WebSocket 管道
+│   └── web/               # Web 控制器
+│       ├── controller.py  # HTTP 路由
+│       ├── session.py     # 会话/排队管理
+│       ├── streaming.py   # RTMP 推流
+│       ├── templates/     # HTML 模板
+│       └── static/        # JS/CSS 资源
+├── config/                # 配置文件
+│   ├── default.json      # 默认配置
+│   └── env.example       # 环境变量模板
+├── scripts/              # 启动脚本
+│   └── start_all.sh     # 一键启动
+└── tests/                # 测试文件
 ```
 
 ## 🚀 快速开始
 
-### 前置条件
+### 1. 安装 LeRobot（核心依赖）
 
-本项目基于 [LeRobot](https://github.com/huggingface/lerobot) 机器人控制框架，需要先安装 lerobot：
+本项目依赖 [LeRobot](https://github.com/huggingface/lerobot) 机器人控制框架：
 
 ```bash
+# 安装 lerobot
 pip install lerobot
-lerobot-info  # 验证安装
+
+# 验证安装
+lerobot-info
+
+# 如需 LeKiwi 支持，安装额外依赖
+pip install lerobot[lekiwi]
 ```
 
-详见 LeRobot 官方文档：https://huggingface.co/docs/lerobot
+> 📖 LeRobot 详细文档：https://huggingface.co/docs/lerobot
 
-### 1. 安装依赖
+### 2. 安装本项目
 
 ```bash
 # 克隆项目
-git clone https://github.com/stevenbobo23/moyurobot.git
+git clone https://github.com/your-username/moyurobot.git
 cd moyurobot
 
-# 创建虚拟环境（推荐使用 lerobot 环境）
-conda activate lerobot  # 或 source venv/bin/activate
-
-# 安装依赖
+# 安装项目（推荐在 lerobot 的虚拟环境中）
 pip install -e .
+
+# 安装额外依赖
+pip install flask fastmcp websockets python-dotenv opencv-python
 ```
 
-### 2. 启动服务
+### 3. 机器人校准（首次使用）
 
-#### 一键启动所有服务
+在首次使用前，需要校准机械臂：
+
 ```bash
+# 使用 lerobot 校准工具
+python -m lerobot.scripts.control_robot \
+    --robot.type=lekiwi \
+    --robot.id=my_awesome_kiwi \
+    --control.type=calibrate
+```
+
+校准文件保存在 `~/.cache/huggingface/lerobot/calibration/`
+
+### 4. 配置环境变量（可选）
+
+```bash
+# 复制配置模板
+cp config/env.example .env
+
+# 编辑配置（API Key、推流地址等）
+vim .env
+```
+
+### 5. 启动服务
+
+```bash
+# 一键启动所有服务
 ./scripts/start_all.sh
+
+# 或单独启动 Web 控制器
+python -m moyurobot.web.controller --robot-id my_awesome_kiwi
 ```
 
-#### 单独启动 Web 控制器
-```bash
-./scripts/start_web.sh
-# 访问 http://localhost:8080
-# 默认密码: moyu123
-```
-
-#### 单独启动 MCP 服务器
-```bash
-./scripts/start_mcp.sh
-```
-
-#### 启动远程管道
-```bash
-export MCP_ENDPOINT="wss://your-server.com/ws"
-./scripts/start_pipe.sh
-```
+访问 http://localhost:8080 开始控制！
 
 ## 🎮 使用说明
 
-### Web 控制
+### Web 控制界面
 
-1. 打开浏览器访问 `http://localhost:8080`
-2. 输入密码登录（默认: `moyu123`）
-3. 选择控制模式：
-   - **手柄模式**: 使用方向按钮或键盘控制
-   - **手势模式**: 开启摄像头，使用手势控制
-   - **人脸追踪**: 机器人自动追踪人脸
+1. 打开浏览器访问 `http://localhost:8080`（或机器人 IP）
+2. 输入用户名登录
+3. 使用控制面板操作机器人
 
 ### 键盘快捷键
 
-| 按键 | 功能 |
-|------|------|
-| W / ↑ | 前进 |
-| S / ↓ | 后退 |
-| A / ← | 左移 |
-| D / → | 右移 |
-| Q | 左转 |
-| E | 右转 |
-| Space | 停止 |
-| + | 加速 |
-| - | 减速 |
+| 按键 | 功能 | 按键 | 功能 |
+|------|------|------|------|
+| W | 前进 | Q | 左转 |
+| S | 后退 | E | 右转 |
+| A | 左移 | Space | 停止 |
+| D | 右移 | H/J | 左/右旋转 |
 
 ### 手势控制
+
+开启手势控制后，通过摄像头识别手势：
 
 | 手势 | 功能 |
 |------|------|
@@ -129,10 +147,44 @@ export MCP_ENDPOINT="wss://your-server.com/ws"
 | ✊ 握拳 | 关闭夹爪 |
 | ☝️ 竖起食指 | 前进 |
 | 👍 竖起大拇指 | 打开夹爪 |
+| ✌️ 剪刀手 | 左转 |
 
-### MCP AI 控制
+### 机械臂控制
 
-配置 Claude Desktop 或其他 MCP 客户端：
+使用滑块控制 6 个关节：
+- **肩部水平** (shoulder_pan): ±60°
+- **肩部垂直** (shoulder_lift): ±55°
+- **肘关节** (elbow_flex): ±50°
+- **腕关节弯曲** (wrist_flex): ±70°
+- **腕关节旋转** (wrist_roll): ±70°
+- **夹爪** (gripper): 0-60°
+
+## 🤖 MCP AI 控制
+
+### 可用的 MCP 工具
+
+本项目提供以下 MCP 工具供 AI 调用：
+
+| 工具名 | 功能 |
+|--------|------|
+| `move_robot` | 控制机器人移动（forward/backward/left/right/stop） |
+| `rotate_robot` | 控制机器人旋转指定角度 |
+| `control_gripper` | 控制夹爪开关 |
+| `nod_head` | 点头动作 |
+| `shake_head` | 摇头动作 |
+| `twist_waist` | 扭腰动作 |
+| `reset_arm` | 机械臂复位 |
+| `stand_at_attention` | 立正姿态 |
+| `capture_and_analyze_with_qwen` | 拍照并用千问 VL 分析 |
+| `get_robot_status` | 获取机器人状态 |
+| `set_speed_level` | 设置速度等级（slow/medium/fast） |
+
+### 配置 Claude Desktop
+
+编辑 Claude Desktop 配置文件：
+
+**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
 {
@@ -140,59 +192,149 @@ export MCP_ENDPOINT="wss://your-server.com/ws"
         "moyu-robot": {
             "command": "python",
             "args": ["-m", "moyurobot.mcp.server"],
-            "cwd": "/Users/zhengbo.zb/workspaces/moyurobot/src"
+            "cwd": "/path/to/moyurobot/src",
+            "env": {
+                "ROBOT_ID": "my_awesome_kiwi",
+                "QWEN_API_KEY": "your-api-key"
+            }
         }
     }
 }
 ```
 
-## ⚙️ 配置
+### 配置 Cursor
 
-### 环境变量
-
-复制 `config/env.example` 为 `.env` 并配置以下变量：
-
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `ROBOT_ID` | 机器人 ID | `my_awesome_kiwi` |
-| `FLASK_SECRET_KEY` | Flask 密钥（生产环境必须配置） | 随机生成 |
-| `MCP_ENDPOINT` | 远程 MCP 端点（小智 AI 等） | - |
-| `QWEN_API_KEY` | 阿里云千问 VL API Key | - |
-| `RTMP_STREAM_URL` | RTMP 推流地址 | - |
-| `STREAMING_ENABLED` | 是否启用推流 | `false` |
-| `STREAM_ROTATE_180` | 推流画面是否旋转180度 | `false` |
-| `SESSION_TIMEOUT_SECONDS` | 普通用户会话超时（秒） | `100` |
-| `VIP_SESSION_TIMEOUT_SECONDS` | VIP 用户会话超时（秒） | `600` |
-
-### 配置文件
-
-编辑 `config/default.json` 自定义配置：
+编辑 `.cursor/mcp.json`：
 
 ```json
 {
-    "robot": {
-        "linear_speed": 0.2,
-        "angular_speed": 30.0
-    },
-    "web": {
-        "port": 8080
+    "mcpServers": {
+        "moyu-robot": {
+            "command": "python",
+            "args": ["-m", "moyurobot.mcp.server", "--transport", "stdio"],
+            "cwd": "/path/to/moyurobot/src"
+        }
     }
 }
 ```
 
-## 🔧 开发
+## ⚙️ 配置说明
 
-### 运行测试
+### 环境变量
 
-```bash
-pytest tests/
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `ROBOT_ID` | 机器人 ID（与校准文件匹配） | `my_awesome_kiwi` |
+| `FLASK_SECRET_KEY` | Flask 会话密钥 | 随机生成 |
+| `QWEN_API_KEY` | 阿里云千问 VL API Key（拍照分析） | - |
+| `MCP_ENDPOINT` | 远程 MCP 端点（如小智 AI） | - |
+| `RTMP_STREAM_URL` | RTMP 推流地址 | - |
+| `STREAMING_ENABLED` | 是否启用推流 | `false` |
+| `SESSION_TIMEOUT_SECONDS` | 用户控制超时（秒） | `100` |
+| `VIP_SESSION_TIMEOUT_SECONDS` | VIP 用户超时（秒） | `600` |
+
+### 配置文件
+
+`config/default.json`:
+
+```json
+{
+    "robot": {
+        "robot_id": "my_awesome_kiwi",
+        "linear_speed": 0.2,
+        "angular_speed": 30.0,
+        "arm_servo_speed": 0.2,
+        "arm_torque_limit": 600
+    },
+    "cameras": {
+        "front": {
+            "device_name_or_path": "T1 Webcam",
+            "rotate_180": false
+        },
+        "wrist": {
+            "device_name_or_path": "USB Camera",
+            "rotate_180": true
+        }
+    }
+}
 ```
 
-### 代码格式化
+## 🐛 故障排除
+
+### 机器人连接失败
 
 ```bash
+# 检查 USB 连接
+ls /dev/ttyACM* /dev/ttyUSB*
+
+# 检查摄像头
+ls /dev/video*
+
+# 查看设备名称
+cat /sys/class/video4linux/video*/name
+```
+
+### 摄像头无画面
+
+```bash
+# 测试摄像头
+ffplay /dev/video0
+
+# 检查权限
+sudo usermod -a -G video $USER
+```
+
+### MCP 连接问题
+
+```bash
+# 测试 MCP 服务器
+python -m moyurobot.mcp.server --transport stdio
+
+# 查看日志
+tail -f ~/logs/moyurobot_web.log
+```
+
+## 📡 API 接口
+
+### REST API
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/` | GET | 控制界面 |
+| `/status` | GET | 机器人状态 |
+| `/control` | POST | 发送控制命令 |
+| `/cameras` | GET | 摄像头列表 |
+| `/video_feed/<camera>` | GET | 视频流 |
+| `/startmove` | POST | 启用运动控制 |
+| `/stopmove` | POST | 禁用运动控制 |
+| `/session_info` | GET | 会话信息 |
+
+### 控制命令示例
+
+```bash
+# 前进 2 秒
+curl -X POST http://localhost:8080/control \
+  -H "Content-Type: application/json" \
+  -d '{"command": "forward", "duration": 2}'
+
+# 设置机械臂位置
+curl -X POST http://localhost:8080/control \
+  -H "Content-Type: application/json" \
+  -d '{"arm_gripper.pos": 50}'
+```
+
+## 🔧 开发
+
+```bash
+# 运行测试
+pytest tests/
+
+# 代码格式化
 black src/
 isort src/
+
+# 类型检查
+mypy src/
 ```
 
 ## 📝 许可证
@@ -201,7 +343,13 @@ MIT License
 
 ## 🙏 致谢
 
-- [LeRobot](https://github.com/huggingface/lerobot) - 机器人控制框架
-- [FastMCP](https://github.com/jlowin/fastmcp) - MCP 协议实现
-- [MediaPipe](https://mediapipe.dev/) - 手势识别
+- [LeRobot](https://github.com/huggingface/lerobot) - Hugging Face 机器人控制框架
+- [FastMCP](https://github.com/jlowin/fastmcp) - MCP 协议 Python 实现
+- [MediaPipe](https://mediapipe.dev/) - Google 手势识别库
+- [Flask](https://flask.palletsprojects.com/) - Web 框架
 
+## 🔗 相关链接
+
+- LeRobot 文档：https://huggingface.co/docs/lerobot
+- LeKiwi 硬件指南：https://github.com/huggingface/lerobot/tree/main/examples/10_use_so100
+- MCP 协议规范：https://modelcontextprotocol.io/
