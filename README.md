@@ -24,31 +24,36 @@
   - 手腕摄像头（推荐 USB Camera）
 - **运行环境**：树莓派 / Linux PC
 
-> 详见 LeRobot 硬件文档：https://github.com/huggingface/lerobot/tree/main/examples/10_use_so100
+> 详见 LeRobot 硬件文档：https://github.com/huggingface/lerobot
 
 ## 📁 项目结构
 
 ```
 moyurobot/
-├── src/moyurobot/
-│   ├── core/              # 核心服务
-│   │   ├── config.py      # 配置管理
-│   │   └── robot_service.py  # 机器人服务封装
-│   ├── mcp/               # MCP AI 控制
-│   │   ├── server.py      # MCP 工具服务器
-│   │   └── pipe.py        # WebSocket 管道
-│   └── web/               # Web 控制器
-│       ├── controller.py  # HTTP 路由
-│       ├── session.py     # 会话/排队管理
-│       ├── streaming.py   # RTMP 推流
-│       ├── templates/     # HTML 模板
-│       └── static/        # JS/CSS 资源
-├── config/                # 配置文件
-│   ├── default.json      # 默认配置
-│   └── env.example       # 环境变量模板
-├── scripts/              # 启动脚本
-│   └── start_all.sh     # 一键启动
-└── tests/                # 测试文件
+├── pi_client/              # Pi 端代码（运行在树莓派上）
+│   ├── moyurobot/          # Python 包
+│   │   ├── core/           # 核心服务
+│   │   │   ├── config.py   # 配置管理
+│   │   │   └── robot_service.py  # 机器人服务封装
+│   │   ├── mcp/            # MCP AI 控制
+│   │   │   ├── server.py   # MCP 工具服务器
+│   │   │   └── pipe.py     # WebSocket 管道
+│   │   └── web/            # Web 控制器
+│   │       ├── controller.py   # HTTP 路由
+│   │       ├── session.py      # 会话/排队管理
+│   │       ├── streaming.py    # RTMP 推流
+│   │       ├── templates/      # HTML 模板
+│   │       └── static/         # JS/CSS 资源
+│   ├── config/             # 配置文件
+│   │   ├── default.json    # 默认配置
+│   │   └── env.example     # 环境变量模板
+│   ├── scripts/            # 启动脚本
+│   │   └── start_all.sh    # 一键启动
+│   ├── setup.py            # Python 包安装
+│   └── requirements.txt    # 依赖列表
+├── train_server/           # 训练服务器代码（可选）
+├── README.md
+└── .gitignore
 ```
 
 ## 🚀 快速开始
@@ -64,7 +69,7 @@ pip install lerobot
 # 验证安装
 lerobot-info
 
-# 如需 LeKiwi 支持，安装额外依赖
+# 安装LeKiwi依赖
 pip install lerobot[lekiwi]
 ```
 
@@ -76,6 +81,9 @@ pip install lerobot[lekiwi]
 # 克隆项目
 git clone https://github.com/your-username/moyurobot.git
 cd moyurobot
+
+# 进入 Pi 端代码目录
+cd pi_client
 
 # 安装项目（推荐在 lerobot 的虚拟环境中）
 pip install -e .
@@ -101,6 +109,7 @@ python -m lerobot.scripts.control_robot \
 ### 4. 配置环境变量（可选）
 
 ```bash
+# 在 pi_client 目录下
 # 复制配置模板
 cp config/env.example .env
 
@@ -111,10 +120,13 @@ vim .env
 ### 5. 启动服务
 
 ```bash
+# 在 pi_client 目录下
+
 # 一键启动所有服务
 ./scripts/start_all.sh
 
 # 或单独启动 Web 控制器
+export PYTHONPATH="$PWD:$PYTHONPATH"
 python -m moyurobot.web.controller --robot-id my_awesome_kiwi
 ```
 
@@ -192,10 +204,11 @@ python -m moyurobot.web.controller --robot-id my_awesome_kiwi
         "moyu-robot": {
             "command": "python",
             "args": ["-m", "moyurobot.mcp.server"],
-            "cwd": "/path/to/moyurobot/src",
+            "cwd": "/path/to/moyurobot/pi_client",
             "env": {
                 "ROBOT_ID": "my_awesome_kiwi",
-                "QWEN_API_KEY": "your-api-key"
+                "QWEN_API_KEY": "your-api-key",
+                "PYTHONPATH": "/path/to/moyurobot/pi_client"
             }
         }
     }
@@ -212,7 +225,10 @@ python -m moyurobot.web.controller --robot-id my_awesome_kiwi
         "moyu-robot": {
             "command": "python",
             "args": ["-m", "moyurobot.mcp.server", "--transport", "stdio"],
-            "cwd": "/path/to/moyurobot/src"
+            "cwd": "/path/to/moyurobot/pi_client",
+            "env": {
+                "PYTHONPATH": "/path/to/moyurobot/pi_client"
+            }
         }
     }
 }

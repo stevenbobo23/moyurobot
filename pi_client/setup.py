@@ -11,8 +11,8 @@ setup(
     description="摸鱼遥控车控制系统",
     author="MoYu Team",
     python_requires=">=3.10",
-    package_dir={"": "src"},
-    packages=find_packages(where="src"),
+    package_dir={"": "."},
+    packages=find_packages(where="."),
     include_package_data=True,
     package_data={
         "moyurobot.web": ["templates/*.html", "static/*.css", "static/*.js"],

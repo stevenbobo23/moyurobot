@@ -115,9 +115,9 @@ check_dependencies() {
 start_web_controller() {
     log_header "启动 Web 控制器 (MCP HTTP 模式)"
     
-    cd "$PROJECT_ROOT/src"
+    cd "$PROJECT_ROOT"
     
-    export PYTHONPATH="$PROJECT_ROOT/src:$PYTHONPATH"
+    export PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH"
     export WEB_PASSWORD="${WEB_PASSWORD:-moyu123}"
     export ROBOT_ID="${ROBOT_ID:-my_awesome_kiwi}"
     
@@ -191,7 +191,7 @@ start_mcp_pipe() {
     log_info "MCP 端点已配置"
     log_info "MCP 配置: $MCP_CONFIG"
     
-    cd "$PROJECT_ROOT/src"
+    cd "$PROJECT_ROOT"
     
     echo "--- Starting new session $(date) ---" >> "$HOME/logs/moyurobot_pipe.log"
     

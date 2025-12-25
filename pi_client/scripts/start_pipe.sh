@@ -12,8 +12,8 @@ if [ -z "$MCP_ENDPOINT" ]; then
     exit 1
 fi
 
-cd "$PROJECT_ROOT/src"
-export PYTHONPATH="$PROJECT_ROOT/src:$PYTHONPATH"
+cd "$PROJECT_ROOT"
+export PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH"
 export MCP_CONFIG="$PROJECT_ROOT/config/mcp_config.json"
 
 echo "🔗 启动 MCP 管道..."
