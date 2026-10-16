@@ -1,0 +1,110 @@
+{
+  "_说明": "预设动作编排定义。每种 step 的格式: {type: 'arm', positions: {关节短名: 目标角度}, duration: 秒} 平滑插值移动关节; {type: 'gripper', command: 'open'/'close' 或 value: 0-60, duration} 控制夹爪; {type: 'move', command: 'forward/backward/left/right/rotate_left/rotate_right', duration} 底盘移动; {type: 'wait', duration} 等待; {type: 'reset', duration} 机械臂归位。关节短名: shoulder_pan(肩水平±60) / shoulder_lift(肩垂直±55) / elbow_flex(肘±50) / wrist_flex(腕弯±70) / wrist_roll(腕转±70) / gripper(夹爪0-60)。修改本文件后无需重启，下次触发动作时自动热加载。",
+  "actions": {
+    "wave": {
+      "name": "挥手",
+      "icon": "👋",
+      "description": "抬起手臂左右挥动三下",
+      "steps": [
+        {"type": "arm", "positions": {"shoulder_lift": 40, "elbow_flex": -30, "wrist_flex": -20}, "duration": 0.8},
+        {"type": "arm", "positions": {"wrist_roll": 45}, "duration": 0.25},
+        {"type": "arm", "positions": {"wrist_roll": -45}, "duration": 0.25},
+        {"type": "arm", "positions": {"wrist_roll": 45}, "duration": 0.25},
+        {"type": "arm", "positions": {"wrist_roll": -45}, "duration": 0.25},
+        {"type": "arm", "positions": {"wrist_roll": 45}, "duration": 0.25},
+        {"type": "arm", "positions": {"wrist_roll": 0}, "duration": 0.25},
+        {"type": "reset", "duration": 1.0}
+      ]
+    },
+    "nod": {
+      "name": "点头",
+      "icon": "🙂",
+      "description": "腕关节上下摆动三次",
+      "steps": [
+        {"type": "arm", "positions": {"wrist_flex": 55}, "duration": 0.3},
+        {"type": "arm", "positions": {"wrist_flex": 0}, "duration": 0.3},
+        {"type": "arm", "positions": {"wrist_flex": 55}, "duration": 0.3},
+        {"type": "arm", "positions": {"wrist_flex": 0}, "duration": 0.3},
+        {"type": "arm", "positions": {"wrist_flex": 55}, "duration": 0.3},
+        {"type": "arm", "positions": {"wrist_flex": 0}, "duration": 0.3},
+        {"type": "reset", "duration": 0.8}
+      ]
+    },
+    "shake_head": {
+      "name": "摇头",
+      "icon": "🙈",
+      "description": "腕关节左右摆动三次",
+      "steps": [
+        {"type": "arm", "positions": {"wrist_roll": -40}, "duration": 0.3},
+        {"type": "arm", "positions": {"wrist_roll": 40}, "duration": 0.3},
+        {"type": "arm", "positions": {"wrist_roll": -40}, "duration": 0.3},
+        {"type": "arm", "positions": {"wrist_roll": 40}, "duration": 0.3},
+        {"type": "arm", "positions": {"wrist_roll": -40}, "duration": 0.3},
+        {"type": "arm", "positions": {"wrist_roll": 0}, "duration": 0.3},
+        {"type": "reset", "duration": 0.8}
+      ]
+    },
+    "twist": {
+      "name": "扭腰",
+      "icon": "🌀",
+      "description": "肩膀左右摆动，像在扭腰",
+      "steps": [
+        {"type": "arm", "positions": {"shoulder_pan": -15}, "duration": 0.8},
+        {"type": "arm", "positions": {"shoulder_pan": 15}, "duration": 0.8},
+        {"type": "arm", "positions": {"shoulder_pan": -15}, "duration": 0.8},
+        {"type": "arm", "positions": {"shoulder_pan": 15}, "duration": 0.8},
+        {"type": "arm", "positions": {"shoulder_pan": 0}, "duration": 0.8}
+      ]
+    },
+    "salute": {
+      "name": "敬礼",
+      "icon": "🫡",
+      "description": "抬手到眉梢敬个礼",
+      "steps": [
+        {"type": "arm", "positions": {"shoulder_pan": 10, "shoulder_lift": 35, "elbow_flex": -45, "wrist_flex": 55}, "duration": 1.0},
+        {"type": "wait", "duration": 1.2},
+        {"type": "reset", "duration": 1.0}
+      ]
+    },
+    "bow": {
+      "name": "鞠躬",
+      "icon": "🙇",
+      "description": "手臂前压，行个礼",
+      "steps": [
+        {"type": "arm", "positions": {"shoulder_lift": 30, "elbow_flex": 35, "wrist_flex": -10}, "duration": 1.0},
+        {"type": "wait", "duration": 0.8},
+        {"type": "reset", "duration": 1.0}
+      ]
+    },
+    "grab": {
+      "name": "抓取",
+      "icon": "🤏",
+      "description": "张开夹爪下探、闭合抓取、抬起",
+      "steps": [
+        {"type": "arm", "positions": {"gripper": 55, "shoulder_lift": 20, "elbow_flex": 15}, "duration": 0.8},
+        {"type": "arm", "positions": {"gripper": 0}, "duration": 0.6},
+        {"type": "wait", "duration": 0.3},
+        {"type": "arm", "positions": {"shoulder_lift": -25, "elbow_flex": -30}, "duration": 0.8},
+        {"type": "wait", "duration": 0.5},
+        {"type": "reset", "duration": 1.2}
+      ]
+    },
+    "dance": {
+      "name": "舞动",
+      "icon": "🕺",
+      "description": "手臂上举，左右摇摆热舞一段",
+      "steps": [
+        {"type": "arm", "positions": {"shoulder_lift": 40, "elbow_flex": -40, "gripper": 30}, "duration": 0.6},
+        {"type": "arm", "positions": {"shoulder_pan": 20, "wrist_roll": 40}, "duration": 0.35},
+        {"type": "arm", "positions": {"shoulder_pan": -20, "wrist_roll": -40}, "duration": 0.35},
+        {"type": "arm", "positions": {"shoulder_pan": 20, "wrist_roll": 40}, "duration": 0.35},
+        {"type": "arm", "positions": {"shoulder_pan": -20, "wrist_roll": -40}, "duration": 0.35},
+        {"type": "arm", "positions": {"shoulder_pan": 20, "wrist_roll": 40}, "duration": 0.35},
+        {"type": "arm", "positions": {"shoulder_pan": -20, "wrist_roll": -40}, "duration": 0.35},
+        {"type": "arm", "positions": {"shoulder_lift": -15, "elbow_flex": 25, "shoulder_pan": 0, "wrist_roll": 0}, "duration": 0.5},
+        {"type": "wait", "duration": 0.4},
+        {"type": "reset", "duration": 1.2}
+      ]
+    }
+  }
+}

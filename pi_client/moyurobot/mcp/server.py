@@ -969,6 +969,85 @@ def control_multiple_arm_joints_limited(joint_positions: str) -> dict:
         return {"success": False, "error": f"多关节控制异常: {str(e)}"}
 
 
+@mcp.tool()
+def play_preset_action(action_id: str) -> dict:
+    """
+    执行预设动作编排（与网页按钮共用的动作库）
+
+    可用动作可通过 list_preset_actions 查询，也可直接尝试:
+    wave(挥手) / nod(点头) / shake_head(摇头) / twist(扭腰) /
+    salute(敬礼) / bow(鞠躬) / grab(抓取) / dance(舞动)
+
+    Args:
+        action_id: 动作 ID
+
+    Returns:
+        dict: 操作结果
+    """
+    logger.info(f"执行预设动作: {action_id}")
+
+    service = get_service()
+    if service is None:
+        return {"success": False, "error": "机器人服务不可用"}
+
+    try:
+        from moyurobot.core.actions import get_action_player
+        player = get_action_player(service)
+        if player is None:
+            return {"success": False, "error": "动作播放器不可用"}
+        return player.play(action_id)
+    except Exception as e:
+        logger.error(f"预设动作执行失败: {e}")
+        return {"success": False, "error": f"预设动作异常: {str(e)}"}
+
+
+@mcp.tool()
+def list_preset_actions() -> dict:
+    """
+    列出所有可用的预设动作编排
+
+    Returns:
+        dict: 动作列表（id/名称/图标/描述/步数）
+    """
+    service = get_service()
+    if service is None:
+        return {"success": False, "error": "机器人服务不可用"}
+
+    try:
+        from moyurobot.core.actions import get_action_player
+        player = get_action_player(service)
+        if player is None:
+            return {"success": False, "error": "动作播放器不可用"}
+        return {
+            "success": True,
+            "actions": player.list_actions(),
+            "playing": player.get_state(),
+        }
+    except Exception as e:
+        logger.error(f"查询预设动作失败: {e}")
+        return {"success": False, "error": f"查询异常: {str(e)}"}
+
+
+@mcp.tool()
+def stop_preset_action() -> dict:
+    """
+    急停当前正在执行的预设动作（机械臂保持在当前位置）
+    """
+    service = get_service()
+    if service is None:
+        return {"success": False, "error": "机器人服务不可用"}
+
+    try:
+        from moyurobot.core.actions import get_action_player
+        player = get_action_player(service)
+        if player is None:
+            return {"success": False, "error": "动作播放器不可用"}
+        return player.stop(wait=True)
+    except Exception as e:
+        logger.error(f"停止预设动作失败: {e}")
+        return {"success": False, "error": f"停止异常: {str(e)}"}
+
+
 # 启动服务器
 if __name__ == "__main__":
     import argparse

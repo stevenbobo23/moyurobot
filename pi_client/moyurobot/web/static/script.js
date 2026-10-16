@@ -737,11 +737,122 @@ function checkCameraStatus() {
         });
 }
 
+// ---------- 预设动作编排 ----------
+
+// 防抖：动作按钮冷却（秒）。播放中重复点击会先停旧动作再播新动作，冷却避免误触发
+let presetActionBusy = false;
+
+function loadPresetActions() {
+    fetch('/actions')
+        .then(response => response.json())
+        .then(data => {
+            const grid = document.getElementById('preset-actions-grid');
+            if (!grid) return;
+
+            if (!data.success || !data.actions || data.actions.length === 0) {
+                grid.innerHTML = '<div class="col-span-4 text-center text-[10px] text-gray-600 font-mono py-2">暂无预设动作</div>';
+                return;
+            }
+
+            grid.innerHTML = '';
+            data.actions.forEach(action => {
+                const btn = document.createElement('button');
+                btn.className = 'preset-action-btn h-14 bg-gray-800 hover:bg-gray-700 rounded border-b-2 border-gray-950 hover:border-gray-900 transition-all flex flex-col items-center justify-center gap-0.5 active:translate-y-[2px] active:border-b-0';
+                btn.title = action.description || action.name;
+                btn.onclick = () => runPresetAction(action.id, btn);
+                btn.innerHTML = `
+                    <span class="text-lg leading-none">${action.icon || '🎬'}</span>
+                    <span class="text-[10px] font-mono text-gray-400 group-hover:text-white">${action.name}</span>
+                `;
+                grid.appendChild(btn);
+            });
+        })
+        .catch(error => {
+            console.error('加载预设动作失败:', error);
+            const grid = document.getElementById('preset-actions-grid');
+            if (grid) {
+                grid.innerHTML = '<div class="col-span-4 text-center text-[10px] text-red-500 font-mono py-2">动作加载失败</div>';
+            }
+        });
+}
+
+function runPresetAction(actionId, btn) {
+    if (presetActionBusy) return;
+    presetActionBusy = true;
+
+    // 按钮按下视觉反馈
+    const siblings = document.querySelectorAll('.preset-action-btn');
+    siblings.forEach(b => b.classList.remove('ring-1', 'ring-tech-500', 'bg-tech-600'));
+    if (btn) {
+        btn.classList.add('ring-1', 'ring-tech-500', 'bg-tech-600');
+    }
+
+    fetch('/action/run', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action_id: actionId})
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            console.log('动作已触发:', data.message);
+            // 显示急停按钮
+            const stopBtn = document.getElementById('action-stop-btn');
+            if (stopBtn) stopBtn.classList.remove('hidden');
+        } else {
+            console.error('动作执行失败:', data.message);
+            alert('动作执行失败: ' + data.message);
+            if (btn) btn.classList.remove('ring-1', 'ring-tech-500', 'bg-tech-600');
+        }
+    })
+    .catch(error => {
+        console.error('发送动作命令失败:', error);
+        if (btn) btn.classList.remove('ring-1', 'ring-tech-500', 'bg-tech-600');
+    })
+    .finally(() => {
+        presetActionBusy = false;
+    });
+}
+
+function stopPresetAction() {
+    fetch('/action/stop', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'}
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log('急停结果:', data);
+        const stopBtn = document.getElementById('action-stop-btn');
+        if (stopBtn) stopBtn.classList.add('hidden');
+        document.querySelectorAll('.preset-action-btn').forEach(b => b.classList.remove('ring-1', 'ring-tech-500', 'bg-tech-600'));
+    })
+    .catch(error => console.error('发送急停失败:', error));
+}
+
+// 动作结束后轮询收尾（隐藏急停按钮、清除高亮）
+function pollPresetActionState() {
+    fetch('/actions')
+        .then(response => response.json())
+        .then(data => {
+            if (!data.playing || !data.playing.playing) {
+                const stopBtn = document.getElementById('action-stop-btn');
+                const anyActive = stopBtn && !stopBtn.classList.contains('hidden');
+                if (anyActive && (!data.playing || !data.playing.playing)) {
+                    stopBtn.classList.add('hidden');
+                    document.querySelectorAll('.preset-action-btn').forEach(b => b.classList.remove('ring-1', 'ring-tech-500', 'bg-tech-600'));
+                }
+            }
+        })
+        .catch(error => console.debug('轮询动作状态失败:', error));
+}
+
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', () => {
     updateStatus();
     initArmSliders();
     initVideoStreams(); // 初始化视频流
+    loadPresetActions(); // 加载预设动作按钮
+    setInterval(pollPresetActionState, 2000); // 轮询动作播放状态
     console.log('LeKiwi HTTP Controller 已加载');
     console.log('键盘控制: W(前进) S(后退) A(左转) D(右转) Q(左旋转) E(右旋转) 空格(停止)');
     console.log('机械臂控制: 使用滑块调节各关节位置');

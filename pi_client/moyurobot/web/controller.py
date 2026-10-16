@@ -286,6 +286,67 @@ def setup_routes():
                 "message": str(e)
             })
     
+    # ---------- 预设动作编排 ----------
+
+    def _get_action_player():
+        """懒创建全局 ActionPlayer（依赖 service）"""
+        if service is None:
+            return None
+        try:
+            from moyurobot.core.actions import get_action_player
+            return get_action_player(service)
+        except Exception as e:
+            logger.error(f"创建动作播放器失败: {e}")
+            return None
+
+    @app.route('/actions', methods=['GET'])
+    def list_actions():
+        """列出所有预设动作"""
+        player = _get_action_player()
+        if player is None:
+            return jsonify({"success": False, "actions": [], "message": "机器人服务未初始化"})
+        return jsonify({
+            "success": True,
+            "actions": player.list_actions(),
+            "playing": player.get_state(),
+        })
+
+    @app.route('/action/run', methods=['POST'])
+    def run_action():
+        """执行预设动作"""
+        if not _movement_enabled:
+            return jsonify({
+                "success": False,
+                "message": "当前处于仅监控模式，找摸鱼管理员启用控制模式"
+            })
+        player = _get_action_player()
+        if player is None:
+            return jsonify({"success": False, "message": "机器人服务未初始化"})
+        try:
+            data = request.get_json(silent=True) or {}
+            action_id = data.get("action_id")
+            if not action_id:
+                return jsonify({"success": False, "message": "缺少 action_id 参数"})
+            result = player.play(action_id)
+            return jsonify(result)
+        except Exception as e:
+            logger.error(f"执行预设动作失败: {e}")
+            return jsonify({"success": False, "message": str(e)})
+
+    @app.route('/action/stop', methods=['POST'])
+    def stop_action():
+        """急停当前正在执行的预设动作（机械臂保持当前位置）"""
+        player = _get_action_player()
+        if player is None:
+            return jsonify({"success": False, "message": "机器人服务未初始化"})
+        try:
+            result = player.stop(wait=False)
+            result["playing"] = player.get_state()
+            return jsonify(result)
+        except Exception as e:
+            logger.error(f"停止预设动作失败: {e}")
+            return jsonify({"success": False, "message": str(e)})
+
     @app.route('/video_feed/<camera>')
     def video_feed(camera):
         """视频流端点"""
