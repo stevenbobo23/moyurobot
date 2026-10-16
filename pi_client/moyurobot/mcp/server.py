@@ -21,9 +21,13 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 
-# 配置日志（统一走日志治理模块：去重 + 退避 + 限速，日志始终写 stderr）
+# 先加载 pi_client/.env（已有环境变量优先），再配置日志
+from moyurobot.env_file import load_env
 from moyurobot.logging_setup import setup_logging
 
+load_env()
+
+# 配置日志（统一走日志治理模块：去重 + 退避 + 限速，日志始终写 stderr）
 setup_logging()
 logger = logging.getLogger('MoYuMCP')
 

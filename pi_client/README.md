@@ -64,6 +64,28 @@ AUDIO_BACKEND=sim python -m moyurobot.web.controller --port 8080
 PYTHONPATH=. python moyurobot/tests/test_audio_pipeline.py
 ```
 
+### 用域名访问（反向代理 / 内网穿透）
+
+网页和音频服务的端口不是一个（8080 / 8081），一旦前面挂了域名，前端**没法自己猜出**
+该连哪儿，得把浏览器实际用的地址告诉它。写 `config/default.json` 的
+`audio.ws_public_url`，或 `pi_client/.env` 里的 `AUDIO_WS_PUBLIC_URL`（环境变量优先）：
+
+```bash
+# 网页与音频用不同域名的情况（外网是 wss，内网仍是 ws://<树莓派>:8081）
+AUDIO_WS_PUBLIC_URL=https://lerobotwws.mycodebro.cn/
+# 解析结果：wss://lerobotwws.mycodebro.cn/audio
+```
+
+写法很宽松：`http`/`https` 会自动换成 `ws`/`wss`，只写域名会自动补 `/audio`
+且**不会**自作多情加上 `:8081`；`{host}` / `{port}` / `{path}` 可做占位符。
+留空 = 用 `config/default.json` 的值，写 `auto` / `none` / `-` = 强制按当前访问地址推导。
+
+改完重启服务，然后确认生效（返回的 `ws_url` 就是前端真正去连的地址）：
+
+```bash
+curl -s https://lerobot.mycodebro.cn/audio/info | python -m json.tool | grep -E 'ws_url|ws_public_url'
+```
+
 详见 [docs/语音对讲.md](docs/语音对讲.md)：硬件准备、HTTPS 三个解法、面板说明、
 参数表、协议格式、排错表。
 
@@ -115,7 +137,12 @@ for OpenCVCamera(/dev/video0): OpenCVCamera(/dev/video0) read failed (status=Fal
 
 ## 环境变量
 
-参见 `config/env.example` 文件。
+参见 `config/env.example` 文件。`cp config/env.example .env` 后，**网页服务、MCP 服务、
+命令行入口都会自动加载 `pi_client/.env`**（此前只有 MCP 管道加载过它，`.env` 里的
+`AUDIO_*`、API Key 对网页服务其实一直无效）。
+
+优先级：shell / systemd 里已 export 的变量 > `.env` > `config/default.json` > 代码默认值。
+也就是说 `.env` **不会**覆盖已经存在的环境变量，只有缺失的才由它补齐。
 
 ## 详细文档
 

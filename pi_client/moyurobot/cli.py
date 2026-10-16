@@ -10,9 +10,13 @@ import os
 import sys
 from pathlib import Path
 
-# 统一日志配置：去重 + 退避 + 限速，避免 lerobot 摄像头刷屏写满磁盘
+# 先加载 pi_client/.env，日志级别等配置才会认它（已有环境变量优先，不会被覆盖）
+from moyurobot.env_file import load_env
 from moyurobot.logging_setup import setup_logging
 
+load_env()
+
+# 统一日志配置：去重 + 退避 + 限速，避免 lerobot 摄像头刷屏写满磁盘
 setup_logging()
 logger = logging.getLogger('MoYuRobot')
 

@@ -38,6 +38,10 @@ from moyurobot.web.session import (
 from moyurobot.web import streaming
 from moyurobot.web import audio_ws
 from moyurobot.logging_setup import setup_logging
+from moyurobot.env_file import load_env
+
+# 先加载 pi_client/.env，后面的日志级别 / 音频配置 / API Key 才会认它
+load_env()
 
 # 全局变量
 app = None

@@ -26,7 +26,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import threading
 import time
 import uuid
@@ -35,6 +34,7 @@ from typing import Callable, Dict, List, Optional
 from urllib.parse import unquote
 
 from moyurobot.core.audio import AudioConfig, IntercomHub, get_hub
+from moyurobot.public_url import resolve_ws_url
 
 logger = logging.getLogger(__name__)
 
@@ -161,30 +161,32 @@ class AudioWebSocketServer:
             "host": self.host,
             "port": self.port,
             "path": self.path,
+            "public_url": (self.config.ws_public_url or "").strip(),
             "clients": self.client_count,
             "listeners": self.hub.listener_count,
             "error": self._start_error,
         }
 
     def build_client_config(self, request=None, ws_public_url: Optional[str] = None) -> Dict:
-        """生成注入到网页的配置（含根据当前访问方式推导出的 ws 地址）"""
+        """生成注入到网页的配置（含根据当前访问方式推导出的 ws 地址）
+
+        地址优先用 ``AUDIO_WS_PUBLIC_URL`` / ``config/default.json`` 里配的值
+        （反代、多域名场景必须配，见 moyurobot/public_url.py），没配才按当前请求推导。
+        """
         hub_state = self.hub.state()
 
-        url = (ws_public_url or self.config.ws_public_url or "").strip()
-        if not url:
-            scheme = "ws"
-            host = "127.0.0.1"
-            if request is not None:
-                if request.is_secure or os.environ.get("AUDIO_WS_TLS") == "1":
-                    scheme = "wss"
-                host = (request.host or "127.0.0.1").split(":")[0]
-            url = f"{scheme}://{host}:{self.port}{self.path}"
+        configured = (ws_public_url or self.config.ws_public_url or "").strip()
+        url, url_source = resolve_ws_url(
+            configured, request=request, port=self.port, path=self.path
+        )
 
         sim = self.hub.backend == "sim"
         return {
             "available": bool(self.config.enabled),
             "running": self._serving,
             "ws_url": url,
+            "ws_url_source": url_source,
+            "ws_public_url": configured,
             "path": self.path,
             "sample_rate": self.config.sample_rate,
             "channels": self.config.channels,
@@ -644,6 +646,8 @@ def build_client_config(request=None) -> Dict:
         "available": bool(cfg.enabled),
         "running": False,
         "ws_url": "",
+        "ws_url_source": "none",
+        "ws_public_url": (cfg.ws_public_url or "").strip(),
         "sample_rate": cfg.sample_rate,
         "channels": cfg.channels,
         "chunk_ms": cfg.chunk_ms,

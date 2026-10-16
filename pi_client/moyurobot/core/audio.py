@@ -107,7 +107,15 @@ class AudioConfig:
         cfg.backend = env.get("AUDIO_BACKEND", cfg.backend).strip().lower() or "auto"
         cfg.capture_device = env.get("AUDIO_CAPTURE_DEVICE", cfg.capture_device).strip()
         cfg.playback_device = env.get("AUDIO_PLAYBACK_DEVICE", cfg.playback_device).strip()
-        cfg.ws_public_url = env.get("AUDIO_WS_PUBLIC_URL", cfg.ws_public_url).strip()
+        # 空值 = 沿用 config/default.json 里的配置（env.example 里这行默认就是空的，
+        # 直接赋值会把配置文件里的地址抹掉）；要强制回到自动推导就写 auto / none / -
+        raw_public = env.get("AUDIO_WS_PUBLIC_URL")
+        if raw_public is not None:
+            raw_public = str(raw_public).strip()
+            if raw_public.lower() in ("auto", "none", "-"):
+                cfg.ws_public_url = ""
+            elif raw_public:
+                cfg.ws_public_url = raw_public
         cfg.ws_host = env.get("AUDIO_WS_HOST", cfg.ws_host).strip() or "0.0.0.0"
         cfg.sample_rate = _env_int(env, "AUDIO_SAMPLE_RATE", cfg.sample_rate)
         cfg.channels = _env_int(env, "AUDIO_CHANNELS", cfg.channels)
@@ -154,6 +162,8 @@ class AudioConfig:
         self.sample_rate = min(48000, max(8000, sr))
         self.channels = 1 if int(self.channels) <= 1 else 2
         self.chunk_ms = min(500, max(20, int(self.chunk_ms)))
+        self.ws_host = (self.ws_host or "").strip() or "0.0.0.0"
+        self.ws_public_url = (self.ws_public_url or "").strip()
         self.ws_port = int(self.ws_port) if self.ws_port else 8081
         self.max_clients = max(1, int(self.max_clients))
 

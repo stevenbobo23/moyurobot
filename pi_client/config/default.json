@@ -52,7 +52,7 @@
         "talk_gain": 1.0,
         "ws_host": "0.0.0.0",
         "ws_port": 8081,
-        "ws_public_url": "",
+        "ws_public_url": "wss://lerobotwws.mycodebro.cn/audio",
         "max_clients": 8,
         "capture_idle_close_s": 2.0,
         "require_auth": true
