@@ -39,6 +39,23 @@
         "endpoint_url": "wss://your-endpoint.example.com/ws",
         "reconnect_interval": 5,
         "max_reconnect_attempts": -1
+    },
+    "audio": {
+        "enabled": true,
+        "backend": "auto",
+        "capture_device": "",
+        "playback_device": "",
+        "sample_rate": 16000,
+        "channels": 1,
+        "chunk_ms": 100,
+        "monitor_gain": 1.0,
+        "talk_gain": 1.0,
+        "ws_host": "0.0.0.0",
+        "ws_port": 8081,
+        "ws_public_url": "",
+        "max_clients": 8,
+        "capture_idle_close_s": 2.0,
+        "require_auth": true
     }
 }
 

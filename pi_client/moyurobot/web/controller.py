@@ -36,6 +36,7 @@ from moyurobot.web.session import (
     VIP_SESSION_TIMEOUT_SECONDS
 )
 from moyurobot.web import streaming
+from moyurobot.web import audio_ws
 
 # 全局变量
 app = None
@@ -45,6 +46,47 @@ mcp = None  # MCP 服务实例
 
 # 运动控制开关，默认关闭（监控模式）
 _movement_enabled = False
+
+
+def _audio_authorize(user_id, username):
+    """音频 WebSocket 的鉴权：登录后可听；当前控制者可说"""
+    if not username:
+        return {
+            "ok": False,
+            "reason": "未登录：请先进入控制台页面再使用语音对讲",
+        }
+    active = session_manager.is_session_active()
+    is_owner = bool(user_id) and session_manager.active_user_id == user_id
+    can_talk = bool(is_owner or not active)
+    return {
+        "ok": True,
+        "username": username,
+        "can_monitor": True,
+        "can_talk": can_talk,
+        "reason": "" if can_talk else f"当前控制权在 {session_manager.active_username} 手上",
+    }
+
+
+def _index_context(username):
+    """渲染控制台所需的额外上下文（音频对讲配置）"""
+    try:
+        audio_config = audio_ws.build_client_config(request)
+    except Exception as e:
+        logger.warning(f"构建音频配置失败: {e}")
+        audio_config = {
+            "available": False,
+            "running": False,
+            "ws_url": "",
+            "sample_rate": 16000,
+            "chunk_ms": 100,
+            "error": str(e),
+        }
+    return {
+        "username": username,
+        "audio_config": audio_config,
+        "audio_ws_url": audio_config.get("ws_url") or "",
+        "audio_sample_rate": audio_config.get("sample_rate", 16000),
+    }
 
 
 def setup_routes():
@@ -77,7 +119,7 @@ def setup_routes():
                 {"Content-Type": "text/html; charset=utf-8"},
             )
 
-        response = make_response(render_template('index.html', username=username))
+        response = make_response(render_template('index.html', **_index_context(username)))
         response.set_cookie(
             SESSION_COOKIE_NAME,
             user_id,
@@ -99,7 +141,7 @@ def setup_routes():
         # VIP 用户强制获取控制权
         session_manager.try_acquire_control(user_id, username, is_vip=True)
 
-        response = make_response(render_template('index.html', username=username))
+        response = make_response(render_template('index.html', **_index_context(username)))
         response.set_cookie(
             SESSION_COOKIE_NAME,
             user_id,
@@ -347,6 +389,36 @@ def setup_routes():
             logger.error(f"停止预设动作失败: {e}")
             return jsonify({"success": False, "message": str(e)})
 
+    # ---------- 语音对讲 ----------
+
+    @app.route('/audio/info', methods=['GET'])
+    def audio_info():
+        """音频对讲能力探测：后端、设备、WebSocket 地址、权限"""
+        try:
+            info = audio_ws.build_client_config(request)
+        except Exception as e:
+            return jsonify({"available": False, "error": str(e)})
+        server = audio_ws.get_server()
+        hub = None
+        try:
+            from moyurobot.core.audio import get_hub
+            hub = get_hub()
+        except Exception:
+            hub = None
+        auth = _audio_authorize(
+            request.cookies.get(SESSION_COOKIE_NAME),
+            request.cookies.get(USERNAME_COOKIE_NAME),
+        )
+        info["capabilities"] = hub.capabilities() if hub else {}
+        info["permissions"] = {
+            "can_monitor": auth.get("can_monitor", False),
+            "can_talk": auth.get("can_talk", False),
+            "reason": auth.get("reason", ""),
+            "logged_in": bool(request.cookies.get(USERNAME_COOKIE_NAME)),
+        }
+        info["server"] = server.describe_state() if server else {"running": False}
+        return jsonify(info)
+
     @app.route('/video_feed/<camera>')
     def video_feed(camera):
         """视频流端点"""
@@ -441,7 +513,8 @@ def setup_routes():
         })
 
 
-def run_server(host="0.0.0.0", port=8080, robot_id="my_awesome_kiwi", mcp_mode=None, mcp_port=8000):
+def run_server(host="0.0.0.0", port=8080, robot_id="my_awesome_kiwi", mcp_mode=None, mcp_port=8000,
+               audio_enabled=True, audio_port=None, ssl_cert=None, ssl_key=None):
     """启动HTTP服务器，可选同时启动MCP服务
     
     Args:
@@ -450,6 +523,9 @@ def run_server(host="0.0.0.0", port=8080, robot_id="my_awesome_kiwi", mcp_mode=N
         robot_id: 机器人ID
         mcp_mode: MCP模式 ('http' 或 'stdio')，None表示不启用MCP
         mcp_port: MCP HTTP服务器端口（仅在mcp_mode='http'时有效）
+        audio_enabled: 是否启动语音对讲 WebSocket 服务
+        audio_port: 语音对讲 WebSocket 端口（默认取 AUDIO_WS_PORT 或 8081）
+        ssl_cert / ssl_key: 可选，启用 HTTPS（浏览器要麦克风权限必须走安全上下文）
     """
     global app, service, logger, mcp
     
@@ -511,7 +587,37 @@ def run_server(host="0.0.0.0", port=8080, robot_id="my_awesome_kiwi", mcp_mode=N
     
     logger.info("使用浏览器访问控制界面，或通过API发送控制命令")
     
+    # 启动语音对讲服务（独立端口，不影响 HTTP/MCP）
+    if audio_enabled:
+        try:
+            server = audio_ws.start_audio_server(
+                auth_fn=_audio_authorize,
+                host=None,   # 默认监听 0.0.0.0，可用 AUDIO_WS_HOST 覆盖
+                port=audio_port,
+            )
+            if server:
+                st = server.describe_state()
+                logger.info(
+                    "✓ 语音对讲已就绪: ws://%s:%s%s（后端=%s）",
+                    st["host"], st["port"], st["path"], audio_ws.get_config().backend,
+                )
+            else:
+                err = audio_ws.get_server()
+                logger.warning(
+                    "⚠️ 语音对讲未启动: %s（可用 --no-audio 或 AUDIO_ENABLED=0 关闭）",
+                    getattr(err, "start_error", "未知原因"),
+                )
+        except Exception as e:
+            logger.error(f"语音对讲启动失败: {e}")
+    else:
+        logger.info("语音对讲已禁用（--no-audio）")
+    
     # 定义Flask运行函数
+    ssl_context = None
+    if ssl_cert and ssl_key:
+        ssl_context = (ssl_cert, ssl_key)
+        logger.info("HTTPS 已启用（浏览器可在非 localhost 环境申请麦克风权限）")
+    
     def run_flask():
         try:
             app.run(
@@ -519,7 +625,8 @@ def run_server(host="0.0.0.0", port=8080, robot_id="my_awesome_kiwi", mcp_mode=N
                 port=port,
                 debug=False,
                 threaded=True,
-                use_reloader=False
+                use_reloader=False,
+                ssl_context=ssl_context
             )
         except Exception as e:
             logger.error(f"HTTP服务启动失败: {e}")
@@ -551,6 +658,10 @@ def cleanup():
     """清理资源"""
     global service
     streaming.stop_streaming()
+    try:
+        audio_ws.stop_audio_server()
+    except Exception as e:
+        logger.warning(f"关闭语音对讲失败: {e}")
     if service:
         service.disconnect()
 
@@ -611,6 +722,29 @@ if __name__ == "__main__":
         default=8000,
         help="MCP服务器HTTP端口（仅在mcp-mode=http时有效）"
     )
+    parser.add_argument(
+        "--no-audio",
+        action="store_true",
+        help="禁用语音对讲（监听车端声音 / 按住说话）"
+    )
+    parser.add_argument(
+        "--audio-port",
+        type=int,
+        default=None,
+        help="语音对讲 WebSocket 端口（默认 8081，也可用 AUDIO_WS_PORT 配置）"
+    )
+    parser.add_argument(
+        "--ssl-cert",
+        type=str,
+        default=None,
+        help="HTTPS 证书路径（与 --ssl-key 同时提供；浏览器申请麦克风权限需要安全上下文）"
+    )
+    parser.add_argument(
+        "--ssl-key",
+        type=str,
+        default=None,
+        help="HTTPS 私钥路径"
+    )
     
     args = parser.parse_args()
     
@@ -646,11 +780,19 @@ if __name__ == "__main__":
             print("  - MCP 服务支持")
         if streaming.STREAMING_ENABLED:
             print("  - RTMP 视频推流")
+        if not args.no_audio:
+            print(f"  - 语音对讲（监听/对讲，WebSocket 端口 {args.audio_port or '8081'}）")
         print("按 Ctrl+C 停止服务")
         print("=========================")
     
     try:
-        run_server(args.host, args.port, args.robot_id, args.mcp_mode, args.mcp_port)
+        run_server(
+            args.host, args.port, args.robot_id, args.mcp_mode, args.mcp_port,
+            audio_enabled=not args.no_audio,
+            audio_port=args.audio_port,
+            ssl_cert=args.ssl_cert,
+            ssl_key=args.ssl_key,
+        )
     except KeyboardInterrupt:
         if args.mcp_mode != 'stdio':
             print("\n收到键盘中断，正在关闭服务...")

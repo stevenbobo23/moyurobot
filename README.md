@@ -12,6 +12,7 @@
   - 人脸追踪：自动追踪人脸方向
 - 🦾 **机械臂控制**: 6 自由度机械臂精确控制
 - 📹 **实时视频**: 多摄像头 MJPEG 视频流 + RTMP 推流支持
+- 🔊 **语音对讲**: 网页端像云摄像头一样听车端声音，按住说话回传车端喇叭（半双工）
 - 🔗 **远程连接**: WebSocket 管道支持远程 AI 控制
 
 ## 🔧 硬件要求
@@ -34,21 +35,24 @@ moyurobot/
 │   ├── moyurobot/          # Python 包
 │   │   ├── core/           # 核心服务
 │   │   │   ├── config.py   # 配置管理
+│   │   │   ├── actions.py  # 预设动作编排
+│   │   │   ├── audio.py    # 音频对讲中枢（采集广播 / 对讲独占）
 │   │   │   └── robot_service.py  # 机器人服务封装
 │   │   ├── mcp/            # MCP AI 控制
 │   │   │   ├── server.py   # MCP 工具服务器
 │   │   │   └── pipe.py     # WebSocket 管道
 │   │   └── web/            # Web 控制器
 │   │       ├── controller.py   # HTTP 路由
+│   │       ├── audio_ws.py     # 音频 WebSocket 服务
 │   │       ├── session.py      # 会话/排队管理
 │   │       ├── streaming.py    # RTMP 推流
 │   │       ├── templates/      # HTML 模板
 │   │       └── static/         # JS/CSS 资源
 │   ├── config/             # 配置文件
-│   │   ├── default.json    # 默认配置
+│   │   ├── default.json    # 默认配置（含 audio 段）
 │   │   └── env.example     # 环境变量模板
-│   ├── scripts/            # 启动脚本
-│   │   └── start_all.sh    # 一键启动
+│   ├── docs/               # 详细文档（语音对讲等）
+│   ├── scripts/            # 启动脚本 + 音频自检 / 自签证书
 │   ├── setup.py            # Python 包安装
 │   └── requirements.txt    # 依赖列表
 ├── train_server/           # 训练服务器代码（可选）
@@ -170,6 +174,29 @@ python -m moyurobot.web.controller --robot-id my_awesome_kiwi
 - **腕关节弯曲** (wrist_flex): ±70°
 - **腕关节旋转** (wrist_roll): ±70°
 - **夹爪** (gripper): 0-60°
+
+### 🔊 语音对讲
+
+控制台右侧「语音对讲」面板，需要车端外接 USB 麦克风 + 音箱（`sudo apt install alsa-utils`）：
+
+| 操作 | 效果 |
+| --- | --- |
+| 点「监听车端」 | 像云摄像头一样听到车端麦克风的声音，多人可同时听 |
+| 按住「按住说话」（或键盘 `T`） | 本地麦克风上传到车端音箱播放，半双工对讲 |
+
+- 没人监听时车端自动释放麦克风；松开说话键立刻释放本地麦克风
+- 有人说话时所有客户端本地静音，避免车端喇叭回授啸叫
+- 无硬件时可先用模拟后端看效果：`AUDIO_BACKEND=sim python -m moyurobot.web.controller`
+- ⚠️ 浏览器只在 HTTPS / localhost 下给麦克风权限，局域网 IP + http 打开时**只能听、不能说**，
+  见 `pi_client/scripts/gen_self_signed_cert.sh` 与 [文档](pi_client/docs/语音对讲.md)
+
+自检与测试：
+
+```bash
+cd pi_client
+./scripts/audio_selftest.sh                                   # 硬件自检（录音+回放）
+PYTHONPATH=. python moyurobot/tests/test_audio_pipeline.py     # 端到端协议测试（无需声卡）
+```
 
 ## 🤖 MCP AI 控制
 
@@ -321,6 +348,7 @@ tail -f ~/logs/moyurobot_web.log
 | `/control` | POST | 发送控制命令 |
 | `/cameras` | GET | 摄像头列表 |
 | `/video_feed/<camera>` | GET | 视频流 |
+| `/audio/info` | GET | 语音对讲能力探测（后端、设备、ws 地址、权限） |
 | `/startmove` | POST | 启用运动控制 |
 | `/stopmove` | POST | 禁用运动控制 |
 | `/session_info` | GET | 会话信息 |
