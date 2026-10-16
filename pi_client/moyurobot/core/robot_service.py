@@ -145,40 +145,81 @@ class RobotService:
             logger.error("请确保已安装 lerobot[lekiwi] 依赖")
             return False
     
+    def _resolve_camera_path(self, camera_name: str, default_path: str,
+                             key: str, skip_missing: bool) -> Optional[str]:
+        """解析摄像头设备路径，设备不存在时按需跳过
+
+        lerobot 的 OpenCVCamera 在后台线程里按采集帧率不断重试，设备不存在/被占用
+        时会以 30fps 刷同一句 WARNING，把日志文件写爆。这里在把路径交给 lerobot
+        之前先校验一次：设备不存在就直接不注册该摄像头，从根上避免无效重试。
+
+        Args:
+            camera_name: 配置里的设备名称（用于自动查找设备路径）
+            default_path: 自动查找失败时的回退路径
+            key: 摄像头键名（front / wrist）
+            skip_missing: 设备不存在时是否跳过该摄像头
+
+        Returns:
+            可用的设备路径；被跳过时返回 None
+        """
+        path = find_camera_by_name(camera_name)
+        if path is None:
+            path = default_path
+            logger.warning(f"未找到摄像头 '{camera_name}'，回退到默认路径: {path}")
+
+        if os.path.exists(path):
+            return path
+
+        if skip_missing:
+            logger.warning(
+                f"摄像头设备不存在，已跳过 {key}（{camera_name} -> {path}）；"
+                "这样可以避免 lerobot 按采集帧率反复打印 read failed 占满磁盘。"
+                "接好设备后重启服务即可；如确实需要让 lerobot 自己重试，设置 CAMERA_SKIP_MISSING=0"
+            )
+            return None
+
+        logger.warning(f"摄像头设备不存在: {path}（{key}），交由 lerobot 打开并重试")
+        return path
+
     def _create_robot(self):
         """创建机器人实例"""
         if not self._import_lerobot():
             return None
-        
+
+        # 设备缺失时是否跳过该摄像头（默认跳过，避免日志刷屏）
+        skip_missing = os.environ.get("CAMERA_SKIP_MISSING", "1").strip().lower() \
+            not in ("0", "false", "no", "off")
+
         # 查找摄像头
-        front_path = find_camera_by_name(self.config.front_camera_name)
-        if front_path is None:
-            front_path = "/dev/video0"
-            logger.warning(f"未找到 '{self.config.front_camera_name}'，使用默认路径: {front_path}")
-        
-        wrist_path = find_camera_by_name(self.config.wrist_camera_name)
-        if wrist_path is None:
-            wrist_path = "/dev/video3"
-            logger.warning(f"未找到 '{self.config.wrist_camera_name}'，使用默认路径: {wrist_path}")
-        
-        # 创建摄像头配置
-        cameras_config = {
-            "front": self._camera_config_class(
+        front_path = self._resolve_camera_path(
+            self.config.front_camera_name, "/dev/video0", "front", skip_missing
+        )
+        wrist_path = self._resolve_camera_path(
+            self.config.wrist_camera_name, "/dev/video3", "wrist", skip_missing
+        )
+
+        # 创建摄像头配置（只注册可用的设备）
+        cameras_config = {}
+        if front_path:
+            cameras_config["front"] = self._camera_config_class(
                 index_or_path=front_path,
                 fps=30,
                 width=640,
                 height=480,
                 rotation=self._cv2_rotation.NO_ROTATION
-            ),
-            "wrist": self._camera_config_class(
+            )
+        if wrist_path:
+            cameras_config["wrist"] = self._camera_config_class(
                 index_or_path=wrist_path,
                 fps=30,
                 width=640,
                 height=480,
                 rotation=self._cv2_rotation.ROTATE_180
             )
-        }
-        
+
+        if not cameras_config:
+            logger.warning("没有任何可用摄像头，视频画面与控制台预览将不可用（机器人本体控制不受影响）")
+
         robot_config = self._robot_config_class(
             id=self.config.robot_id,
             cameras=cameras_config

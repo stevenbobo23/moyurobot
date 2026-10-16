@@ -10,10 +10,10 @@ import os
 import sys
 from pathlib import Path
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# 统一日志配置：去重 + 退避 + 限速，避免 lerobot 摄像头刷屏写满磁盘
+from moyurobot.logging_setup import setup_logging
+
+setup_logging()
 logger = logging.getLogger('MoYuRobot')
 
 
@@ -68,6 +68,11 @@ def main():
     )
     
     subparsers = parser.add_subparsers(dest="command", help="子命令")
+
+    parser.add_argument("--log-level", default=None,
+                        help="日志级别（DEBUG/INFO/WARNING/ERROR），默认取环境变量 LOG_LEVEL")
+    parser.add_argument("--log-file", action="store_true",
+                        help="同时写入滚动日志文件（LOG_DIR/LOG_FILE，默认 ~/logs/moyurobot.log）")
     
     # MCP 子命令
     mcp_parser = subparsers.add_parser("mcp", help="启动 MCP 服务器")
@@ -87,11 +92,15 @@ def main():
     pipe_parser.set_defaults(func=cmd_pipe)
     
     args = parser.parse_args()
-    
+
     if args.command is None:
         parser.print_help()
         sys.exit(0)
-    
+
+    # 命令行参数优先于环境变量，重新配置一次
+    if args.log_level or args.log_file:
+        setup_logging(level=args.log_level, log_to_file=True if args.log_file else None, force=True)
+
     args.func(args)
 
 

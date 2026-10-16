@@ -17,11 +17,10 @@ from dotenv import load_dotenv
 # 加载环境变量
 load_dotenv()
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# 配置日志（统一走日志治理模块：去重 + 退避 + 限速，日志始终写 stderr）
+from moyurobot.logging_setup import setup_logging
+
+setup_logging()
 logger = logging.getLogger('MoYu_MCP_PIPE')
 
 # 重连设置

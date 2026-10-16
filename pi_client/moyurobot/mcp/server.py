@@ -21,11 +21,10 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# 配置日志（统一走日志治理模块：去重 + 退避 + 限速，日志始终写 stderr）
+from moyurobot.logging_setup import setup_logging
+
+setup_logging()
 logger = logging.getLogger('MoYuMCP')
 
 # 修复 Windows 控制台的 UTF-8 编码

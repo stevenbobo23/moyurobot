@@ -37,6 +37,7 @@ from moyurobot.web.session import (
 )
 from moyurobot.web import streaming
 from moyurobot.web import audio_ws
+from moyurobot.logging_setup import setup_logging
 
 # 全局变量
 app = None
@@ -529,7 +530,9 @@ def run_server(host="0.0.0.0", port=8080, robot_id="my_awesome_kiwi", mcp_mode=N
     """
     global app, service, logger, mcp
     
-    logging.basicConfig(level=logging.INFO)
+    # 统一日志配置：同一条消息去重 + 指数退避重报 + 单 logger 限速，
+    # 避免 lerobot 摄像头在后台线程里按帧率刷屏把 SD 卡写满。
+    setup_logging()
     logger = logging.getLogger(__name__)
     
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -745,8 +748,26 @@ if __name__ == "__main__":
         default=None,
         help="HTTPS 私钥路径"
     )
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        default=None,
+        help="日志级别（DEBUG/INFO/WARNING/ERROR），默认取环境变量 LOG_LEVEL"
+    )
+    parser.add_argument(
+        "--log-file",
+        action="store_true",
+        help="同时写入滚动日志文件（LOG_DIR/LOG_FILE，默认 ~/logs/moyurobot.log，单文件上限 LOG_MAX_BYTES）"
+    )
     
     args = parser.parse_args()
+
+    # 日志配置：命令行参数优先，其余取环境变量（LOG_LEVEL / LOG_DEDUP_WINDOW_S / ...）
+    setup_logging(
+        level=args.log_level,
+        log_to_file=True if args.log_file else None,
+        force=bool(args.log_level or args.log_file),
+    )
     
     # 应用推流配置（命令行参数优先于环境变量）
     if args.enable_stream or args.tuiliu:

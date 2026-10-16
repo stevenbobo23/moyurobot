@@ -26,7 +26,7 @@ pi_client/
 │   ├── web/            # Web 控制器（含音频 WebSocket 服务）
 │   └── tests/          # 测试（含音频端到端测试，无需硬件）
 ├── config/             # 配置文件
-├── scripts/            # 启动脚本 + 音频自检 / 自签证书
+├── scripts/            # 启动脚本 + 日志轮转 + 音频自检 / 自签证书
 ├── docs/               # 详细文档
 ├── setup.py            # 安装脚本
 └── requirements.txt    # 依赖列表
@@ -66,6 +66,52 @@ PYTHONPATH=. python moyurobot/tests/test_audio_pipeline.py
 
 详见 [docs/语音对讲.md](docs/语音对讲.md)：硬件准备、HTTPS 三个解法、面板说明、
 参数表、协议格式、排错表。
+
+## 日志治理（防刷屏 / 防撑爆磁盘）
+
+LeRobot 的摄像头在设备掉线或被占用时，会在采集后台线程里**按帧率（30fps）反复打印同一句警告**：
+
+```
+WARNING lerobot.cameras.opencv.camera_opencv: Error reading frame in background thread
+for OpenCVCamera(/dev/video0): OpenCVCamera(/dev/video0) read failed (status=False).
+```
+
+一路摄像头一天就是 260 万行（几百 MB），两路能轻松写爆 SD 卡。系统做了三层处理：
+
+1. **同一条消息去重 + 指数退避**：先打印一次，之后按 `1s → 2s → 4s …` 最长 300s 重报，
+   被压掉的条数会挂在下一条消息后面。持续故障的日志量从 O(时间) 降到 O(log 时间)：
+   实测 30fps × 2 路跑 6 秒 = 338 条输入 → 只输出 6 行。
+2. **单 logger 限速**：每条都不同的日志洪流，按 `LOG_RATE_LIMIT_PER_S` 兜住。
+3. **滚动落盘**：`LOG_TO_FILE=1` 时由 `RotatingFileHandler` 限制单文件大小与备份数，
+   磁盘占用有硬上限。
+4. **设备缺失直接跳过**：启动前校验摄像头设备文件，不存在就不注册该摄像头，
+   从根上避免无效重试（`CAMERA_SKIP_MISSING=0` 可恢复旧行为）。
+
+常用配置（完整列表见 `config/env.example`）：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `LOG_LEVEL` | `INFO` | 根日志级别 |
+| `LOG_NOISY_LEVEL` | `WARNING` | 噪声 logger（lerobot 摄像头、PIL 等）级别；设 `ERROR` 可**彻底静音**摄像头刷屏 |
+| `LOG_DEDUP_WINDOW_S` | `1.0` | 同一消息初始抑制窗口，`0` = 关闭去重 |
+| `LOG_DEDUP_MAX_WINDOW_S` | `300` | 退避上限 |
+| `LOG_RATE_LIMIT_PER_S` | `20` | 单 logger 每秒最多放行条数，`0` = 关闭限速 |
+| `LOG_MAX_BYTES` / `LOG_BACKUP_COUNT` | `5MB` / `3` | 单文件上限与备份数量（最多 20MB） |
+| `CAMERA_SKIP_MISSING` | `1` | 设备不存在的摄像头直接跳过 |
+
+服务是用 `>>` 重定向写 `~/logs/*.log` 的，Python 侧的 `RotatingFileHandler` 管不到这个 fd，
+所以脚本会额外做**原地截断**轮转（保持 inode 不变，运行中的服务不会丢日志、无需重启）：
+
+```bash
+./scripts/rotate_logs.sh                                   # 预览（默认 dry-run，不改文件）
+./scripts/rotate_logs.sh --max-mb 20 --keep-lines 5000 --apply
+# 挂 cron：每天凌晨 4 点
+# 0 4 * * * /path/to/pi_client/scripts/rotate_logs.sh --apply >/dev/null 2>&1
+```
+
+`./scripts/start_all.sh` 每次启动前也会按 `LOG_MAX_MB`（默认 8MB）自动轮转一次。
+
+命令行同样可以覆盖：`python -m moyurobot.web.controller --log-level WARNING --log-file`。
 
 ## 环境变量
 

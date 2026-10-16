@@ -9,8 +9,15 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# 日志目录与轮转策略
+# 服务用 >> 追加写日志，Python 侧的 RotatingFileHandler 管不到这个重定向，
+# 所以每次启动前在这里做一次"按大小轮转"，避免日志无限增长撑爆 SD 卡。
+LOG_DIR="${LOG_DIR:-$HOME/logs}"
+LOG_MAX_MB="${LOG_MAX_MB:-8}"
+LOG_KEEP_LINES="${LOG_KEEP_LINES:-3000}"
+
 # 确保日志目录存在
-mkdir -p "$HOME/logs"
+mkdir -p "$LOG_DIR"
 
 # 日志函数 (兼容 sh)
 log_info() {
@@ -29,6 +36,34 @@ log_header() {
     printf "\n========================================\n"
     printf "  %s\n" "$1"
     printf "========================================\n\n"
+}
+
+# 日志轮转：文件超过 LOG_MAX_MB 时只保留最后 LOG_KEEP_LINES 行
+# 注意用「原地截断」（copytruncate 风格）而不是 mv：
+# 如果上一次启动的进程还持有该文件的 fd，mv 会让它继续写到已删除的 inode 上，
+# 既丢日志又白占空间；原地写入保持 inode 不变，不会丢新日志。
+rotate_log() {
+    file="$1"
+    [ -f "$file" ] || return 0
+
+    # 用字节数判断，不用 du -m（块大小会让小文件也报 1MB）
+    size_bytes=$(wc -c < "$file" 2>/dev/null | tr -d ' ')
+    [ -n "$size_bytes" ] || return 0
+
+    max_bytes=$((LOG_MAX_MB * 1024 * 1024))
+    if [ "$size_bytes" -lt "$max_bytes" ]; then
+        return 0
+    fi
+
+    size_mb=$(awk -v b="$size_bytes" 'BEGIN { printf "%.1f", b / 1048576 }')
+    tmp="$file.rotate.tmp"
+    if tail -n "$LOG_KEEP_LINES" "$file" > "$tmp" 2>/dev/null && cat "$tmp" > "$file" 2>/dev/null; then
+        rm -f "$tmp"
+        log_info "日志已轮转: $(basename "$file") (${size_mb}MB -> 保留最近 ${LOG_KEEP_LINES} 行)"
+    else
+        rm -f "$tmp"
+        log_warn "日志轮转失败: $file"
+    fi
 }
 
 # 清理函数
@@ -125,8 +160,10 @@ start_web_controller() {
     log_info "Web 端口: 8080 | MCP HTTP 端口: 8000"
     log_info "两个服务共享同一个机器人连接（避免资源冲突）"
     
-    # 记录日志
-    echo "--- Starting new session $(date) ---" >> "$HOME/logs/moyurobot_web.log"
+    # 记录日志（启动前先做一次大小轮转）
+    LOG_FILE_PATH="$LOG_DIR/moyurobot_web.log"
+    rotate_log "$LOG_FILE_PATH"
+    echo "--- Starting new session $(date) ---" >> "$LOG_FILE_PATH"
     
     # 使用命令行参数启动
     # --mcp-mode http: 在同一进程中同时运行 Flask 和 MCP HTTP 服务器
@@ -138,13 +175,13 @@ start_web_controller() {
         --tuiliu \
         --mcp-mode http \
         --mcp-port 8000 \
-        >> "$HOME/logs/moyurobot_web.log" 2>&1 &
+        >> "$LOG_FILE_PATH" 2>&1 &
     WEB_PID=$!
     
     log_info "Web + MCP 服务已启动 (PID: $WEB_PID)"
     log_info "Web 访问地址: http://localhost:8080"
     log_info "MCP HTTP 地址: http://localhost:8000"
-    log_info "日志文件: $HOME/logs/moyurobot_web.log"
+    log_info "日志文件: $LOG_FILE_PATH (超过 ${LOG_MAX_MB}MB 自动轮转)"
 }
 
 # 等待 Web 服务器就绪
@@ -158,8 +195,8 @@ wait_for_web_server() {
         # 检查进程是否还在运行
         if ! kill -0 $WEB_PID 2>/dev/null; then
             log_error "Web 服务器进程意外退出！"
-            log_error "查看日志: cat $HOME/logs/moyurobot_web.log"
-            tail -20 "$HOME/logs/moyurobot_web.log"
+            log_error "查看日志: cat $LOG_DIR/moyurobot_web.log"
+            tail -20 "$LOG_DIR/moyurobot_web.log"
             exit 1
         fi
         
@@ -193,13 +230,15 @@ start_mcp_pipe() {
     
     cd "$PROJECT_ROOT"
     
-    echo "--- Starting new session $(date) ---" >> "$HOME/logs/moyurobot_pipe.log"
+    LOG_FILE_PATH="$LOG_DIR/moyurobot_pipe.log"
+    rotate_log "$LOG_FILE_PATH"
+    echo "--- Starting new session $(date) ---" >> "$LOG_FILE_PATH"
     
-    python -m moyurobot.mcp.pipe >> "$HOME/logs/moyurobot_pipe.log" 2>&1 &
+    python -m moyurobot.mcp.pipe >> "$LOG_FILE_PATH" 2>&1 &
     PIPE_PID=$!
     
     log_info "MCP 管道服务已启动 (PID: $PIPE_PID)"
-    log_info "日志文件: $HOME/logs/moyurobot_pipe.log"
+    log_info "日志文件: $LOG_FILE_PATH"
     log_warn "注意: Pipe 服务会启动独立的 MCP stdio 服务器"
     log_warn "      如果出现机器人连接冲突，请检查日志"
 }
@@ -213,13 +252,15 @@ start_tuya_mcp() {
         
         cd "$TUYA_DIR"
         
-        echo "--- Starting new session $(date) ---" >> "$HOME/logs/tuya_quick_start.log"
+        LOG_FILE_PATH="$LOG_DIR/tuya_quick_start.log"
+        rotate_log "$LOG_FILE_PATH"
+        echo "--- Starting new session $(date) ---" >> "$LOG_FILE_PATH"
         
-        python mcp-python/examples/quick_start.py >> "$HOME/logs/tuya_quick_start.log" 2>&1 &
+        python mcp-python/examples/quick_start.py >> "$LOG_FILE_PATH" 2>&1 &
         TUYA_PID=$!
         
         log_info "Tuya MCP SDK 已启动 (PID: $TUYA_PID)"
-        log_info "日志文件: $HOME/logs/tuya_quick_start.log"
+        log_info "日志文件: $LOG_FILE_PATH"
         
         cd "$PROJECT_ROOT"
     else
@@ -243,10 +284,10 @@ show_usage() {
     echo "默认登录: 输入用户名即可"
     echo ""
     echo "日志文件:"
-    echo "  - Web + MCP: $HOME/logs/moyurobot_web.log"
-    echo "  - MCP 管道: $HOME/logs/moyurobot_pipe.log"
+    echo "  - Web + MCP: $LOG_DIR/moyurobot_web.log"
+    echo "  - MCP 管道: $LOG_DIR/moyurobot_pipe.log"
     if [ -n "$TUYA_PID" ]; then
-        echo "  - Tuya: $HOME/logs/tuya_quick_start.log"
+        echo "  - Tuya: $LOG_DIR/tuya_quick_start.log"
     fi
     echo ""
     echo "进程 ID:"
