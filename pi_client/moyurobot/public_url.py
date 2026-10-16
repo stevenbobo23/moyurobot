@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 import os
 from typing import Optional, Tuple
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 logger = logging.getLogger(__name__)
 
@@ -181,9 +181,24 @@ def resolve_ws_url(
     return f"{scheme}://{hostname}:{port}{path}", "auto"
 
 
+def append_query(url: str, key: str, value: str) -> str:
+    """给 URL 追加一个查询参数（原有查询串用 ``&`` 连接）
+
+    用于把身份令牌拼进 WebSocket 地址。``value`` 为空时原样返回 —— 未登录时不该
+    留下一个空参数的尾巴。
+    """
+    if not url or not value:
+        return url
+    parts = urlsplit(url)
+    pair = f"{quote(str(key), safe='')}={quote(str(value), safe='')}"
+    query = f"{parts.query}&{pair}" if parts.query else pair
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+
+
 __all__ = [
     "resolve_ws_url",
     "normalize_public_ws_url",
+    "append_query",
     "request_host_header",
     "request_is_secure",
     "split_host_port",

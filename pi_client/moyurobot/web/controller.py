@@ -27,21 +27,24 @@ if __name__ == "__main__":
 import cv2
 from flask import Flask, jsonify, request, render_template, Response, make_response, redirect, url_for
 
+# 先加载 pi_client/.env：下面这些模块在 import 阶段就会读环境变量
+# （session 的会话超时、音频配置等），必须赶在它们前面
+from moyurobot.env_file import load_env
+
+load_env()
+
 # 导入拆分出的模块
 from moyurobot.web.session import (
     session_manager, 
     SESSION_COOKIE_NAME, 
     USERNAME_COOKIE_NAME,
     SESSION_TIMEOUT_SECONDS,
-    VIP_SESSION_TIMEOUT_SECONDS
+    VIP_SESSION_TIMEOUT_SECONDS,
+    cookie_options,
 )
 from moyurobot.web import streaming
 from moyurobot.web import audio_ws
 from moyurobot.logging_setup import setup_logging
-from moyurobot.env_file import load_env
-
-# 先加载 pi_client/.env，后面的日志级别 / 音频配置 / API Key 才会认它
-load_env()
 
 # 全局变量
 app = None
@@ -72,10 +75,17 @@ def _audio_authorize(user_id, username):
     }
 
 
-def _index_context(username):
-    """渲染控制台所需的额外上下文（音频对讲配置）"""
+def _index_context(username, user_id=None):
+    """渲染控制台所需的额外上下文（音频对讲配置 + 连接令牌）
+
+    ``user_id`` 要由调用方把**路由里实际用的那个**传进来：首页第一次请求时响应头里的
+    Set-Cookie 还没落到浏览器上，``request.cookies`` 里没有它，按 Cookie 取值会签出
+    一个不带会话 ID 的令牌，用户就只能听、不能说。
+    """
     try:
-        audio_config = audio_ws.build_client_config(request)
+        audio_config = audio_ws.build_client_config(
+            request, username=username, user_id=user_id or request.cookies.get(SESSION_COOKIE_NAME)
+        )
     except Exception as e:
         logger.warning(f"构建音频配置失败: {e}")
         audio_config = {
@@ -124,14 +134,8 @@ def setup_routes():
                 {"Content-Type": "text/html; charset=utf-8"},
             )
 
-        response = make_response(render_template('index.html', **_index_context(username)))
-        response.set_cookie(
-            SESSION_COOKIE_NAME,
-            user_id,
-            max_age=24 * 3600,
-            httponly=True,
-            samesite='Lax'
-        )
+        response = make_response(render_template('index.html', **_index_context(username, user_id)))
+        response.set_cookie(SESSION_COOKIE_NAME, user_id, **cookie_options())
         return response
 
     @app.route('/vip', methods=['GET'])
@@ -146,14 +150,8 @@ def setup_routes():
         # VIP 用户强制获取控制权
         session_manager.try_acquire_control(user_id, username, is_vip=True)
 
-        response = make_response(render_template('index.html', **_index_context(username)))
-        response.set_cookie(
-            SESSION_COOKIE_NAME,
-            user_id,
-            max_age=24 * 3600,
-            httponly=True,
-            samesite='Lax'
-        )
+        response = make_response(render_template('index.html', **_index_context(username, user_id)))
+        response.set_cookie(SESSION_COOKIE_NAME, user_id, **cookie_options())
         return response
 
     @app.route('/wait', methods=['GET'])
@@ -186,13 +184,8 @@ def setup_routes():
                 error = "用户名不能为空"
             else:
                 resp = make_response(redirect(url_for('index')))
-                resp.set_cookie(
-                    USERNAME_COOKIE_NAME,
-                    username,
-                    max_age=24 * 3600,
-                    httponly=False,
-                    samesite='Lax'
-                )
+                # 用户名 Cookie 允许 JS 读取，故不开 httponly；domain/secure 与其它 Cookie 保持一致
+                resp.set_cookie(USERNAME_COOKIE_NAME, username, **cookie_options(http_only=False))
                 return resp
 
         return render_template('login.html', error=error)
@@ -398,9 +391,11 @@ def setup_routes():
 
     @app.route('/audio/info', methods=['GET'])
     def audio_info():
-        """音频对讲能力探测：后端、设备、WebSocket 地址、权限"""
+        """音频对讲能力探测：后端、设备、WebSocket 地址（已带登录令牌）、权限"""
+        username = request.cookies.get(USERNAME_COOKIE_NAME)
+        user_id = request.cookies.get(SESSION_COOKIE_NAME)
         try:
-            info = audio_ws.build_client_config(request)
+            info = audio_ws.build_client_config(request, username=username, user_id=user_id)
         except Exception as e:
             return jsonify({"available": False, "error": str(e)})
         server = audio_ws.get_server()
@@ -410,19 +405,19 @@ def setup_routes():
             hub = get_hub()
         except Exception:
             hub = None
-        auth = _audio_authorize(
-            request.cookies.get(SESSION_COOKIE_NAME),
-            request.cookies.get(USERNAME_COOKIE_NAME),
-        )
+        auth = _audio_authorize(user_id, username)
         info["capabilities"] = hub.capabilities() if hub else {}
         info["permissions"] = {
             "can_monitor": auth.get("can_monitor", False),
             "can_talk": auth.get("can_talk", False),
             "reason": auth.get("reason", ""),
-            "logged_in": bool(request.cookies.get(USERNAME_COOKIE_NAME)),
+            "logged_in": bool(username),
         }
         info["server"] = server.describe_state() if server else {"running": False}
-        return jsonify(info)
+        response = jsonify(info)
+        # ws_url 里带着登录令牌，别让浏览器/反代把它缓存下来再发给别人
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.route('/video_feed/<camera>')
     def video_feed(camera):

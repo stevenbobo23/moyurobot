@@ -47,6 +47,9 @@
         capabilities: null,
         hello: null,
         lastError: "",
+        lastClose: "",
+        lastHintedClose: false,
+        authRetries: 0,
         remoteMeterPeak: 0,
         localMeterPeak: 0,
         uiListen: "",
@@ -127,11 +130,57 @@
 
     // ------------------------------------------------------- WebSocket 连接 --
 
+    // 真正去连的地址：服务端注入的 ws_url 里已经带上了登录令牌
+    // （网页和音频不同域名时，会话 Cookie 不会跟着 WebSocket 握手过去）。
     function resolveWsUrl() {
         if (CFG.ws_url) return CFG.ws_url;
         var scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
         var port = CFG.ws_port || 8081;
         return scheme + "//" + window.location.hostname + ":" + port + "/audio";
+    }
+
+    // 展示用的地址：去掉 token 查询参数，免得截图/日志里把令牌带出去
+    function displayWsUrl() {
+        var base = CFG.ws_url_base;
+        if (base) return base;
+        var full = (CFG.ws_url || resolveWsUrl()).split("?")[0];
+        return full;
+    }
+
+    // 服务端说"未登录"，等于手上的令牌过期或失效了（进程重启换了密钥、在别处重新
+    // 登录等）。重新探测一次换新令牌再连，最多两次，免得服务端一直拒绝时打成死循环。
+    function isAuthError(text) {
+        return /未登录|未授权|鉴权/.test(String(text || ""));
+    }
+
+    function refreshAuthToken() {
+        if (state.authRetries >= 2) {
+            setHint("❌ 登录状态已失效：请刷新页面重新进入控制台（" + displayWsUrl() + "）");
+            return;
+        }
+        state.authRetries += 1;
+        setBadge("重新鉴权…", "amber");
+        log("令牌失效，重新探测（第 " + state.authRetries + " 次）");
+        window.setTimeout(function () { fetchInfo(); }, 300);
+    }
+
+    // 关闭码说明：连不上时最有用的一句话，省得对着"未连接"猜
+    var CLOSE_REASONS = {
+        1000: "正常关闭",
+        1001: "对端离开",
+        1005: "未收到关闭状态",
+        1006: "握手失败（域名/反代没通到音频端口、证书或混合内容问题）",
+        1008: "被策略拒绝（登录状态/令牌失效）",
+        1011: "服务端内部错误",
+        1013: "服务端繁忙，稍后重试"
+    };
+
+    function closeText(ev) {
+        if (!ev || ev.code === undefined) return "未知";
+        var text = String(ev.code);
+        if (CLOSE_REASONS[ev.code]) text += "（" + CLOSE_REASONS[ev.code] + "）";
+        if (ev.reason) text += " " + ev.reason;
+        return text;
     }
 
     function connect() {
@@ -152,6 +201,8 @@
         state.ws.onopen = function () {
             state.connected = true;
             state.retryIndex = 0;
+            state.authRetries = 0;   // 连上了说明令牌有效，重新给失效重试留出额度
+            state.lastHintedClose = false;
             log("已连接");
             setBadge("已连接", "cyan");
             if (state.monitorWanted) sendJson({ type: "monitor", on: true });
@@ -163,14 +214,21 @@
                 handleRemotePcm(ev.data);
             }
         };
-        state.ws.onclose = function () {
+        state.ws.onclose = function (ev) {
             state.connected = false;
-            log("连接断开");
+            state.lastClose = closeText(ev);
+            log("连接断开（" + state.lastClose + "）");
             if (!state.closing && state.monitorWanted) {
                 setBadge("重连中…", "amber");
                 scheduleReconnect();
             } else {
                 setBadge("未连接", "gray");
+            }
+            // 1006 = 握手阶段就没成功，服务端日志里不会有记录，问题一定在域名/反代这一层
+            if (ev && ev.code === 1006 && !state.lastHintedClose) {
+                state.lastHintedClose = true;
+                setHint("❌ 连不上 " + displayWsUrl() + "（握手失败）：检查反代/隧道是否把该域名指向音频端口，" +
+                        "并保留 /audio 路径与 WebSocket 升级头。");
             }
         };
         state.ws.onerror = function () {
@@ -235,9 +293,10 @@
             case "error":
                 state.lastError = msg.message || "音频错误";
                 setHint("❌ " + state.lastError);
-                log("服务端错误: " + state.lastError);
+                log("服务端错误: " + state.lastError + (msg.auth_source ? "（身份来源 " + msg.auth_source + "）" : ""));
                 // 对讲被拒时立刻复位按钮，避免卡在"正在说话"
                 if (state.pttWanted) stopPtt(true);
+                if (isAuthError(state.lastError)) refreshAuthToken();
                 break;
             case "devices":
                 if (msg.devices) renderDevices(null, msg.devices);
@@ -664,6 +723,11 @@
                     state.canTalk = !!info.permissions.can_talk;
                 }
                 if (info.ws_url) CFG.ws_url = info.ws_url;
+                if (info.ws_url_base) CFG.ws_url_base = info.ws_url_base;
+                if (info.ws_url_source) CFG.ws_url_source = info.ws_url_source;
+                if (info.ws_public_url !== undefined) CFG.ws_public_url = info.ws_public_url;
+                if (info.logged_in !== undefined) CFG.logged_in = !!info.logged_in;
+                if (info.token_ttl) CFG.token_ttl = info.token_ttl;
                 if (info.sample_rate) SAMPLE_RATE = info.sample_rate;
                 if (info.chunk_ms) CHUNK_MS = info.chunk_ms;
                 TX_CHUNK_SAMPLES = Math.round((SAMPLE_RATE * CHUNK_MS) / 1000);
@@ -702,7 +766,18 @@
         lines.push("浏览器麦克风 API: " + (navigator.mediaDevices && navigator.mediaDevices.getUserMedia ? "✅ 可用" : "❌ 不可用，需要 HTTPS/localhost"));
         lines.push("浏览器音频上下文: " + (state.audioCtx ? "✅ " + state.audioCtx.sampleRate + "Hz" : "○ 未创建（点一次监听即可创建）"));
         lines.push("采集方式: " + (state.captureMode ? (state.captureMode === "worklet" ? "✅ AudioWorklet（独立音频线程）" : "⚠️ ScriptProcessor（主线程，兼容模式）") : "○ 未采集"));
-        lines.push("WebSocket: " + (state.connected ? "✅ 已连接" : "❌ 未连接") + " " + resolveWsUrl());
+        var sourceText = CFG.ws_url_source === "config" ? "来源: 服务端配置的公开地址"
+            : (CFG.ws_url_source === "auto" ? "来源: 按当前访问地址推导" : "来源: 未探测");
+        lines.push("WebSocket: " + (state.connected ? "✅ 已连接" : "❌ 未连接") + " " + displayWsUrl() + "（" + sourceText + "）");
+        // 网页和音频不同域名时这个令牌就是唯一的身份凭据，连不上先看它
+        if (CFG.logged_in) {
+            var ttlHours = CFG.token_ttl ? (CFG.token_ttl / 3600).toFixed(1) + " 小时" : "未知";
+            lines.push("连接令牌: ✅ 已签发（有效期 " + ttlHours + "，连不上时会自动换新）");
+        } else {
+            lines.push("连接令牌: ❌ 未签发（当前请求没有登录身份，音频服务会回「未登录」）");
+        }
+        if (state.lastClose) lines.push("最近断开: " + state.lastClose);
+        if (state.lastError) lines.push("最近错误: " + state.lastError);
         lines.push("服务端后端: " + (srv.backend || CFG.backend || "未知") + (srv.simulated || CFG.simulated ? "（模拟）" : ""));
         lines.push("车端麦克风占用: " + (srv.capture_active ? "✅ 已打开" : "○ 空闲（无人监听时自动释放）"));
         lines.push("已下发音频: " + (srv.monitor_kbytes != null ? srv.monitor_kbytes + " KB" : "—") +
@@ -713,7 +788,7 @@
         var playCount = caps.playback_devices ? caps.playback_devices.length : 0;
         lines.push("车端设备: 麦克风 " + captureCount + " 个 / 扬声器 " + playCount + " 个");
         lines.push("权限: 监听 " + (state.canMonitor ? "✅" : "❌") + "，对讲 " + (state.canTalk ? "✅" : "❌"));
-        if (srv.error) lines.push("最近错误: " + srv.error);
+        if (srv.error) lines.push("服务端错误: " + srv.error);
         return lines;
     }
 

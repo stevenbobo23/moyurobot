@@ -33,8 +33,9 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
 from urllib.parse import unquote
 
+from moyurobot import audio_token
 from moyurobot.core.audio import AudioConfig, IntercomHub, get_hub
-from moyurobot.public_url import resolve_ws_url
+from moyurobot.public_url import append_query, resolve_ws_url
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,21 @@ def _header(ws, name: str, default: Optional[str] = None) -> Optional[str]:
         return headers.get(name, default)
     except Exception:
         return default
+
+
+def _request_path(ws) -> str:
+    """握手请求的路径（**含查询串**，令牌就在里面），兼容 websockets 新旧实现"""
+    candidates: List[str] = []
+    request = getattr(ws, "request", None)
+    for holder in (request, ws):
+        for attr in ("path", "raw_path"):
+            value = getattr(holder, attr, None)
+            if isinstance(value, str) and value:
+                candidates.append(value)
+    for value in candidates:      # 优先取带查询串的那个，令牌只可能在那儿
+        if "?" in value:
+            return value
+    return candidates[0] if candidates else ""
 
 
 @dataclass
@@ -162,31 +178,48 @@ class AudioWebSocketServer:
             "port": self.port,
             "path": self.path,
             "public_url": (self.config.ws_public_url or "").strip(),
+            "token_secret": audio_token.secret_source(),
+            "token_ttl": audio_token.token_ttl(),
             "clients": self.client_count,
             "listeners": self.hub.listener_count,
             "error": self._start_error,
         }
 
-    def build_client_config(self, request=None, ws_public_url: Optional[str] = None) -> Dict:
+    def build_client_config(
+        self,
+        request=None,
+        ws_public_url: Optional[str] = None,
+        username: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> Dict:
         """生成注入到网页的配置（含根据当前访问方式推导出的 ws 地址）
 
         地址优先用 ``AUDIO_WS_PUBLIC_URL`` / ``config/default.json`` 里配的值
         （反代、多域名场景必须配，见 moyurobot/public_url.py），没配才按当前请求推导。
+
+        ``username`` / ``user_id`` 是**网页域名**上的登录身份：给了就把身份签成令牌拼进
+        ``ws_url``（见 moyurobot/audio_token.py）。网页和音频不同域名时，Cookie 不会跟着
+        WebSocket 握手跑过去，令牌是唯一可靠的身份来源；同域直连时带着也无害。
         """
         hub_state = self.hub.state()
 
         configured = (ws_public_url or self.config.ws_public_url or "").strip()
-        url, url_source = resolve_ws_url(
+        base_url, url_source = resolve_ws_url(
             configured, request=request, port=self.port, path=self.path
         )
 
+        token = audio_token.mint(username, user_id) if username else ""
         sim = self.hub.backend == "sim"
         return {
             "available": bool(self.config.enabled),
             "running": self._serving,
-            "ws_url": url,
+            "ws_url": append_query(base_url, audio_token.TOKEN_PARAM, token),
+            "ws_url_base": base_url,
             "ws_url_source": url_source,
             "ws_public_url": configured,
+            "logged_in": bool(username),
+            "token_param": audio_token.TOKEN_PARAM,
+            "token_ttl": audio_token.token_ttl(),
             "path": self.path,
             "sample_rate": self.config.sample_rate,
             "channels": self.config.channels,
@@ -274,9 +307,13 @@ class AudioWebSocketServer:
             await self._safe_close(websocket)
             return
 
-        auth = self._authorize(websocket)
+        auth = self._authorize(websocket, raw_path=req_path)
         if not auth.get("ok"):
-            await self._send_json(websocket, {"type": "error", "message": auth.get("reason", "未授权")})
+            await self._send_json(websocket, {
+                "type": "error",
+                "message": auth.get("reason", "未授权"),
+                "auth_source": auth.get("auth_source", "none"),
+            })
             await self._safe_close(websocket)
             return
 
@@ -299,7 +336,10 @@ class AudioWebSocketServer:
             remote_address=peer,
         )
         self._clients[client.id] = client
-        logger.info("音频客户端接入 %s (%s, 用户=%s)", client.id, peer, client.username)
+        logger.info(
+            "音频客户端接入 %s (%s, 用户=%s, 身份来源=%s)",
+            client.id, peer, client.username, auth.get("auth_source", "none"),
+        )
 
         send_task = asyncio.create_task(self._sender(client))
         try:
@@ -318,18 +358,45 @@ class AudioWebSocketServer:
             await self._cleanup_client(client)
             logger.info("音频客户端断开 %s (用户=%s)", client.id, client.username)
 
-    def _authorize(self, websocket) -> Dict:
-        cookies = parse_cookies(_header(websocket, "Cookie"))
-        user_id = cookies.get("moyu_user_id")
-        username = cookies.get("moyu_username")
+    def _authorize(self, websocket, raw_path: Optional[str] = None) -> Dict:
+        """鉴权顺序：地址里的令牌 -> 握手 Cookie -> 未登录
+
+        令牌优先是因为它跨域名有效：网页和音频不同域名时，浏览器不会把网页的 Cookie
+        带到音频域名的握手上，只有令牌能证明身份。Cookie 分支保留给同域/局域网直连
+        以及老页面（缓存里的旧 JS 不会拼令牌）。
+        """
+        user_id = None
+        username = None
+        source = "none"
+
+        token = audio_token.token_from_path(
+            raw_path if raw_path is not None else _request_path(websocket)
+        )
+        if token:
+            claims = audio_token.verify(token)
+            if claims:
+                user_id = claims.get("user_id")
+                username = claims.get("username")
+                source = "token"
+            else:
+                logger.info("音频握手令牌无效或已过期，回退检查 Cookie")
+
+        if not username:
+            cookies = parse_cookies(_header(websocket, "Cookie"))
+            user_id = cookies.get("moyu_user_id")
+            username = cookies.get("moyu_username")
+            if username:
+                source = "cookie"
+
         if self.auth_fn is not None:
             try:
                 result = self.auth_fn(user_id, username)
                 result.setdefault("user_id", user_id)
                 result.setdefault("username", username)
+                result["auth_source"] = source
                 return result
             except Exception as e:
-                return {"ok": False, "reason": f"鉴权失败: {e}"}
+                return {"ok": False, "reason": f"鉴权失败: {e}", "auth_source": source}
         return {
             "ok": True,
             "user_id": user_id,
@@ -337,6 +404,7 @@ class AudioWebSocketServer:
             "can_monitor": True,
             "can_talk": True,
             "reason": "",
+            "auth_source": source,
         }
 
     def _hello(self, client: _Client) -> Dict:
@@ -638,16 +706,36 @@ def stop_audio_server():
             pass
 
 
-def build_client_config(request=None) -> Dict:
+def build_client_config(
+    request=None,
+    username: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> Dict:
     cfg = get_config()
     if _server is not None:
-        return _server.build_client_config(request=request)
+        return _server.build_client_config(
+            request=request, username=username, user_id=user_id
+        )
+
+    # 服务没起来时也给出同样的字段（地址 + 令牌）：调用方不用区分两种情况，
+    # 自检面板也能照常显示「地址对不对、令牌有没有」，排起错来少一个分支
+    base_url, url_source = resolve_ws_url(
+        (cfg.ws_public_url or "").strip(),
+        request=request,
+        port=int(cfg.ws_port or 8081),
+        path=DEFAULT_PATH,
+    )
+    token = audio_token.mint(username, user_id) if username else ""
     return {
         "available": bool(cfg.enabled),
         "running": False,
-        "ws_url": "",
-        "ws_url_source": "none",
+        "ws_url": append_query(base_url, audio_token.TOKEN_PARAM, token),
+        "ws_url_base": base_url,
+        "ws_url_source": url_source,
         "ws_public_url": (cfg.ws_public_url or "").strip(),
+        "logged_in": bool(username),
+        "token_param": audio_token.TOKEN_PARAM,
+        "token_ttl": audio_token.token_ttl(),
         "sample_rate": cfg.sample_rate,
         "channels": cfg.channels,
         "chunk_ms": cfg.chunk_ms,

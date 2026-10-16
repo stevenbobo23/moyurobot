@@ -22,6 +22,44 @@ USERNAME_COOKIE_NAME = "moyu_username"
 SESSION_TIMEOUT_SECONDS = int(os.environ.get("SESSION_TIMEOUT_SECONDS", "100"))
 VIP_SESSION_TIMEOUT_SECONDS = int(os.environ.get("VIP_SESSION_TIMEOUT_SECONDS", "600"))
 
+# Cookie 有效期（与前端登录状态一致）
+COOKIE_MAX_AGE = 24 * 3600
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on", "y")
+
+
+def cookie_domain() -> str:
+    """会话 Cookie 的 Domain（每次调用都读环境变量，便于 .env 后加载也生效）
+
+    网页和音频服务用了**不同域名**时（网页 lerobot.mycodebro.cn、音频
+    lerobotwws.mycodebro.cn），浏览器**不会**把 host-only 的 Cookie 带到音频域名的
+    WebSocket 握手上，服务端拿不到用户名就会当"未登录"把连接关掉。
+
+    这时把 Domain 设成父域即可跨子域共享：
+
+        SESSION_COOKIE_DOMAIN=.mycodebro.cn
+
+    留空 = 浏览器默认（host-only）。用 IP 访问时**不要**设置，否则浏览器会直接丢弃 Cookie。
+    """
+    return os.environ.get("SESSION_COOKIE_DOMAIN", "").strip()
+
+
+def cookie_options(http_only: bool = True) -> Dict:
+    """统一的 set_cookie 参数，避免每个路由各写一份、漏掉 domain/secure"""
+    options: Dict = {"max_age": COOKIE_MAX_AGE, "httponly": http_only, "samesite": "Lax"}
+    domain = cookie_domain()
+    if domain:
+        options["domain"] = domain
+    # TLS 在反代上终止时，Flask 看到的是 http（request.is_secure=False），需要手动开 Secure
+    if _env_flag("SESSION_COOKIE_SECURE"):
+        options["secure"] = True
+    return options
+
 
 @dataclass
 class ActiveUser:

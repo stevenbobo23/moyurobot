@@ -64,6 +64,15 @@ AUDIO_BACKEND=sim python -m moyurobot.web.controller --port 8080
 PYTHONPATH=. python moyurobot/tests/test_audio_pipeline.py
 ```
 
+几个只用标准库、在哪台机器都能跑的小测试（不必装 numpy / lerobot）：
+
+```bash
+PYTHONPATH=. python moyurobot/tests/test_audio_token.py      # 连接令牌：签发/过期/防篡改/握手取值顺序
+PYTHONPATH=. python moyurobot/tests/test_public_url.py       # 对外 ws 地址规范化
+PYTHONPATH=. python moyurobot/tests/test_session_cookie.py   # 会话 Cookie 参数
+PYTHONPATH=. python moyurobot/tests/test_logging_setup.py    # 日志去重/限速/滚动
+```
+
 ### 用域名访问（反向代理 / 内网穿透）
 
 网页和音频服务的端口不是一个（8080 / 8081），一旦前面挂了域名，前端**没法自己猜出**
@@ -80,10 +89,19 @@ AUDIO_WS_PUBLIC_URL=https://lerobotwws.mycodebro.cn/
 且**不会**自作多情加上 `:8081`；`{host}` / `{port}` / `{path}` 可做占位符。
 留空 = 用 `config/default.json` 的值，写 `auto` / `none` / `-` = 强制按当前访问地址推导。
 
-改完重启服务，然后确认生效（返回的 `ws_url` 就是前端真正去连的地址）：
+**身份怎么过去（不同域名时的关键）**：网页登录后，服务端会把当前用户签成一个短期令牌，
+拼在音频地址后面 —— 前端实际连的是 `wss://lerobotwws.mycodebro.cn/audio?token=…`。
+音频服务验签认人，**不依赖 Cookie**：跨域名时会话 Cookie 只属于网页域名，浏览器根本不会
+把它带到音频域名的 WebSocket 握手上，只靠 Cookie 会一直提示「未登录」。所以这里
+**不需要**再配 `SESSION_COOKIE_DOMAIN`（它只给缓存里的旧 JS 兜底）。
+
+令牌默认 6 小时有效，连不上时前端会自己重新拉一次 `/audio/info` 换新令牌再连；
+签发和校验在同一进程里，所以 `AUDIO_TOKEN_SECRET` 默认也不用配。
+
+改完重启服务，然后确认生效（返回的 `ws_url` 就是前端真正去连的地址，`logged_in` 说明有没有签发令牌）：
 
 ```bash
-curl -s https://lerobot.mycodebro.cn/audio/info | python -m json.tool | grep -E 'ws_url|ws_public_url'
+curl -s https://lerobot.mycodebro.cn/audio/info | python -m json.tool | grep -E 'ws_url|ws_public_url|logged_in'
 ```
 
 详见 [docs/语音对讲.md](docs/语音对讲.md)：硬件准备、HTTPS 三个解法、面板说明、
