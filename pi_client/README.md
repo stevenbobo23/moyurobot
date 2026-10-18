@@ -22,11 +22,12 @@ vim .env
 pi_client/
 ├── moyurobot/          # Python 包
 │   ├── core/           # 核心服务（机器人控制 + 音频对讲中枢）
+│   ├── greeting/       # 自动打招呼（人体检测 + 状态机 + 语音 + 动作）
 │   ├── mcp/            # MCP AI 控制
 │   ├── web/            # Web 控制器（含音频 WebSocket 服务）
-│   └── tests/          # 测试（含音频端到端测试，无需硬件）
+│   └── tests/          # 测试（含音频端到端 / 打招呼状态机，无需硬件）
 ├── config/             # 配置文件
-├── scripts/            # 启动脚本 + 日志轮转 + 音频自检 / 自签证书
+├── scripts/            # 启动脚本 + 日志轮转 + 音频自检 / 自签证书 / 招呼语音生成
 ├── docs/               # 详细文档
 ├── setup.py            # 安装脚本
 └── requirements.txt    # 依赖列表
@@ -107,6 +108,25 @@ curl -s https://lerobot.mycodebro.cn/audio/info | python -m json.tool | grep -E 
 详见 [docs/语音对讲.md](docs/语音对讲.md)：硬件准备、HTTPS 三个解法、面板说明、
 参数表、协议格式、排错表。
 
+## 自动打招呼
+
+前置摄像头看到人并停留约 1 秒后，主动说一句话并点个头。默认开启，时段 `08:00-22:00`，
+同一场景 3 分钟内不重复、每小时最多 6 次。
+
+```bash
+# 想让声音稳定可靠（推荐，断网也能用）：先生成一批本地语音
+QWEN_API_KEY=sk-xxx python scripts/gen_greeting_voices.py
+```
+
+- 检测：`auto` = 有 `onnxruntime` + `models/yolo11n.onnx` 就用 YOLO，否则退回 OpenCV HOG（零额外依赖）
+- 语音：本地 wav 池优先，没有就用 DashScope TTS（结果按文本缓存）
+- 动作复用 `config/actions.json` 的 `nod` / `shake_head`，走 `ActionPlayer`（有插值/限位/急停）
+- 三处资源都做了仲裁：对讲中不插话、机械臂忙时只出声不动手、摄像头帧与网页/云端拍照共享
+- 网页「自动招呼」面板可随时开关与「试一次」；MCP 有 `greeting_status` / `greeting_test` / `set_greeting_enabled`
+
+关闭：`--no-greeting`、`GREETING_ENABLED=0`，或网页上点一下。
+详见 [docs/自动打招呼.md](docs/自动打招呼.md)。
+
 ## 日志治理（防刷屏 / 防撑爆磁盘）
 
 LeRobot 的摄像头在设备掉线或被占用时，会在采集后台线程里**按帧率（30fps）反复打印同一句警告**：
@@ -165,5 +185,7 @@ for OpenCVCamera(/dev/video0): OpenCVCamera(/dev/video0) read failed (status=Fal
 ## 详细文档
 
 - [语音对讲（监听 / 对讲）](docs/语音对讲.md)
+- [自动打招呼（使用手册）](docs/自动打招呼.md)
+- [自动打招呼（方案与选型）](docs/自动打招呼方案.md)
 - 项目根目录的 [README.md](../README.md)
 

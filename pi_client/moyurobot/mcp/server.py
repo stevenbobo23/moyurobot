@@ -24,6 +24,7 @@ from fastmcp import FastMCP
 # 先加载 pi_client/.env（已有环境变量优先），再配置日志
 from moyurobot.env_file import load_env
 from moyurobot.logging_setup import setup_logging
+from moyurobot import vision_llm
 
 load_env()
 
@@ -737,7 +738,17 @@ def _capture_front_camera_image_internal(filename: Optional[str] = None) -> dict
     
     try:
         logger.info("读取前置摄像头帧...")
-        frame = front_camera.async_read(timeout_ms=1000)
+        # 自动打招呼的检测器也在读同一路摄像头，走共享读取器避免互相偷帧
+        frame = None
+        try:
+            from moyurobot.greeting.worker import get_frame_broker
+            broker = get_frame_broker("front")
+            if broker is not None:
+                frame = broker.get_frame(max_age_s=0.5, timeout_ms=1000)
+        except Exception as broker_error:
+            logger.debug("共享帧读取器不可用: %s", broker_error)
+        if frame is None:
+            frame = front_camera.async_read(timeout_ms=1000)
         
         if frame is None or frame.size == 0:
             return {"success": False, "error": "无法获取摄像头图片"}
@@ -794,9 +805,13 @@ def _capture_front_camera_image_internal(filename: Optional[str] = None) -> dict
 
 
 @mcp.tool()
-def capture_and_analyze_with_qwen(question: str = "") -> dict:
+def capture_and_analyze(question: str = "") -> dict:
     """
     拍照并分析图片内容，用户想看前方有什么时可以调用
+    
+    视觉模型默认用 DeepSeek 多模态（model=deepseek-flash，即 V4.1-Flash）；
+    只有配置了 QWEN_API_KEY 且没有 DEEPSEEK_API_KEY 时才回退到千问 VL。
+    可用 VISION_PROVIDER 强制指定。
     
     Args:
         question: 用户想了解的内容
@@ -817,64 +832,52 @@ def capture_and_analyze_with_qwen(question: str = "") -> dict:
     try:
         image_path = capture_result["file_path"]
         with open(image_path, "rb") as image_file:
-            image_data = image_file.read()
-            image_base64 = base64.b64encode(image_data).decode('utf-8')
+            image_bytes = image_file.read()
         
-        api_url = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-        api_key = os.environ.get("QWEN_API_KEY")
+        logger.info("调用视觉模型分析图片（%s）...", vision_llm.status().get("provider"))
+        result = vision_llm.analyze_image(image_bytes, full_question, timeout=30.0)
         
-        if not api_key:
-            return {"success": False, "error": "未配置 QWEN_API_KEY 环境变量"}
-        
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
+        logger.info("图片分析完成（%s / %s，%dms）",
+                    result["provider"], result["model"], result["elapsed_ms"])
+        return {
+            "success": True,
+            "user_question": question if question else "无",
+            "full_question": full_question,
+            "answer": result["answer"],
+            "provider": result["provider"],
+            "model": result["model"],
+            "elapsed_ms": result["elapsed_ms"],
+            "image_file": capture_result['filename'],
+            "analysis_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         }
-        
-        payload = {
-            "model": "qwen-vl-plus",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}},
-                        {"type": "text", "text": full_question}
-                    ]
-                }
-            ]
-        }
-        
-        logger.info("调用千问 VL API 分析图片...")
-        response = requests.post(api_url, headers=headers, json=payload, timeout=30)
-        
-        if response.status_code == 200:
-            response_data = response.json()
             
-            if "choices" in response_data and len(response_data["choices"]) > 0:
-                ai_content = response_data["choices"][0]["message"]["content"]
-                
-                logger.info("图片分析完成")
-                return {
-                    "success": True,
-                    "user_question": question if question else "无",
-                    "full_question": full_question,
-                    "answer": ai_content,
-                    "model": "qwen-vl-plus",
-                    "image_file": capture_result['filename'],
-                    "analysis_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-                }
-            else:
-                return {"success": False, "error": "API响应格式异常"}
-        else:
-            return {"success": False, "error": f"API调用失败: {response.status_code}"}
-            
-    except requests.exceptions.Timeout:
-        return {"success": False, "error": "API调用超时"}
-    except requests.exceptions.RequestException as e:
-        return {"success": False, "error": f"网络请求失败: {str(e)}"}
+    except vision_llm.VisionError as e:
+        logger.error(f"图片分析失败: {e}")
+        return {"success": False, "error": f"视觉分析失败: {e}"}
     except Exception as e:
         logger.error(f"图片分析失败: {e}")
         return {"success": False, "error": f"分析异常: {str(e)}"}
+
+
+# 旧工具名保留成普通函数（不再注册为 MCP 工具，避免模型看到两个重复能力）
+def capture_and_analyze_with_qwen(question: str = "") -> dict:
+    """兼容旧调用名；内部已按 VISION_PROVIDER 选择模型，默认 DeepSeek"""
+    return capture_and_analyze(question)
+
+
+@mcp.tool()
+def vision_status() -> dict:
+    """
+    查看拍照分析当前使用的视觉模型与密钥状态
+    
+    Returns:
+        dict: 可用的 provider 列表、模型名、密钥是否已配置
+    """
+    info = vision_llm.status()
+    info["success"] = True
+    if not info["providers"]:
+        info["hint"] = "未配置任何视觉模型密钥：请设置 DEEPSEEK_API_KEY"
+    return info
 
 
 @mcp.tool()
@@ -1049,6 +1052,66 @@ def stop_preset_action() -> dict:
     except Exception as e:
         logger.error(f"停止预设动作失败: {e}")
         return {"success": False, "error": f"停止异常: {str(e)}"}
+
+
+@mcp.tool()
+def greeting_status() -> dict:
+    """
+    查看自动打招呼的状态：是否启用、当前状态（idle/seeing/cooldown）、
+    检测器后端、语音来源、最近几次事件。
+
+    用户问「小车现在会自动打招呼吗」「刚才有没有跟人打招呼」时调用。
+    """
+    try:
+        from moyurobot.greeting.worker import get_greeter
+    except Exception as e:
+        return {"success": False, "error": f"自动打招呼模块不可用: {e}"}
+
+    greeter = get_greeter()
+    if greeter is None:
+        return {
+            "success": False,
+            "error": "自动打招呼未启动（只有网页控制器进程会启动它；stdio 模式的 MCP 是独立进程）",
+        }
+    return {"success": True, **greeter.status()}
+
+
+@mcp.tool()
+def greeting_test(text: str = "") -> dict:
+    """
+    立刻让小车打一次招呼（说话 + 点头），忽略画面检测、时段与冷却，用于现场调试
+
+    Args:
+        text: 想让它说的内容；留空则从文案池随机挑一句
+    """
+    try:
+        from moyurobot.greeting.worker import get_greeter
+    except Exception as e:
+        return {"success": False, "error": f"自动打招呼模块不可用: {e}"}
+
+    greeter = get_greeter()
+    if greeter is None:
+        return {"success": False, "error": "自动打招呼未启动"}
+    return greeter.trigger_now(text.strip() or None)
+
+
+@mcp.tool()
+def set_greeting_enabled(enabled: bool) -> dict:
+    """
+    打开或关闭自动打招呼（运行时生效，重启后回到配置文件的值）
+
+    Args:
+        enabled: true 打开，false 关闭
+    """
+    try:
+        from moyurobot.greeting.worker import get_greeter
+    except Exception as e:
+        return {"success": False, "error": f"自动打招呼模块不可用: {e}"}
+
+    greeter = get_greeter()
+    if greeter is None:
+        return {"success": False, "error": "自动打招呼未启动"}
+    return greeter.set_enabled(enabled)
 
 
 # 启动服务器

@@ -45,6 +45,7 @@ from moyurobot.web.session import (
 from moyurobot.web import streaming
 from moyurobot.web import audio_ws
 from moyurobot.logging_setup import setup_logging
+from moyurobot.greeting import worker as greeting_worker
 
 # 全局变量
 app = None
@@ -419,6 +420,43 @@ def setup_routes():
         response.headers["Cache-Control"] = "no-store"
         return response
 
+    @app.route('/greeting/status')
+    def greeting_status():
+        """自动打招呼状态：检测器、语音来源、当前状态与最近事件"""
+        greeter = greeting_worker.get_greeter()
+        if greeter is None:
+            return jsonify({
+                "enabled": False,
+                "running": False,
+                "error": "自动打招呼未启动（可能用的是 --no-greeting）",
+            })
+        response = jsonify(greeter.status())
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.route('/greeting/enabled', methods=['POST'])
+    def greeting_set_enabled():
+        """运行时开关。写在内存里，重启后回到配置文件的默认值。"""
+        greeter = greeting_worker.get_greeter()
+        if greeter is None:
+            return jsonify({"success": False, "error": "自动打招呼未启动"}), 503
+        payload = request.get_json(silent=True) or {}
+        if "enabled" not in payload:
+            return jsonify({"success": False, "error": "缺少 enabled 字段"}), 400
+        result = greeter.set_enabled(bool(payload["enabled"]))
+        return jsonify(result)
+
+    @app.route('/greeting/test', methods=['POST'])
+    def greeting_test():
+        """立刻打一次招呼（不看画面、不看时段、不占冷却），方便现场调试"""
+        greeter = greeting_worker.get_greeter()
+        if greeter is None:
+            return jsonify({"success": False, "error": "自动打招呼未启动"}), 503
+        payload = request.get_json(silent=True) or {}
+        text = (payload.get("text") or "").strip() or None
+        result = greeter.trigger_now(text)
+        return jsonify(result)
+
     @app.route('/video_feed/<camera>')
     def video_feed(camera):
         """视频流端点"""
@@ -436,7 +474,12 @@ def setup_routes():
                         
                     if service and service.robot and service.robot.is_connected and camera in service.robot.cameras:
                         try:
-                            frame = service.robot.cameras[camera].async_read(timeout_ms=100)
+                            # 前置摄像头可能被自动打招呼的检测器一起用，走共享读取器避免互相偷帧
+                            broker = greeting_worker.get_frame_broker(camera)
+                            if broker is not None:
+                                frame = broker.get_frame(max_age_s=min_interval * 0.5, timeout_ms=200)
+                            else:
+                                frame = service.robot.cameras[camera].async_read(timeout_ms=100)
                             if frame is not None and frame.size > 0:
                                 height, width = frame.shape[:2]
                                 new_width = int(width * 0.7)
@@ -514,7 +557,8 @@ def setup_routes():
 
 
 def run_server(host="0.0.0.0", port=8080, robot_id="my_awesome_kiwi", mcp_mode=None, mcp_port=8000,
-               audio_enabled=True, audio_port=None, ssl_cert=None, ssl_key=None):
+               audio_enabled=True, audio_port=None, ssl_cert=None, ssl_key=None,
+               greeting_enabled=True):
     """启动HTTP服务器，可选同时启动MCP服务
     
     Args:
@@ -526,6 +570,7 @@ def run_server(host="0.0.0.0", port=8080, robot_id="my_awesome_kiwi", mcp_mode=N
         audio_enabled: 是否启动语音对讲 WebSocket 服务
         audio_port: 语音对讲 WebSocket 端口（默认取 AUDIO_WS_PORT 或 8081）
         ssl_cert / ssl_key: 可选，启用 HTTPS（浏览器要麦克风权限必须走安全上下文）
+        greeting_enabled: 是否启动自动打招呼（检测到人就说话 + 点头）
     """
     global app, service, logger, mcp
     
@@ -613,6 +658,24 @@ def run_server(host="0.0.0.0", port=8080, robot_id="my_awesome_kiwi", mcp_mode=N
             logger.error(f"语音对讲启动失败: {e}")
     else:
         logger.info("语音对讲已禁用（--no-audio）")
+
+    # 启动自动打招呼（与语音对讲共用喇叭，内部有独占仲裁）
+    if greeting_enabled:
+        try:
+            greeter = greeting_worker.start_greeter(service)
+            if greeter is not None:
+                st = greeter.status()
+                logger.info(
+                    "✓ 自动打招呼已就绪：%s（检测器=%s，语音=%s，时段=%s）",
+                    "启用" if st["enabled"] else "未启用，可在网页打开",
+                    st["detector"].get("backend", "none"),
+                    st["speech"].get("resolved", "none"),
+                    st["config"].get("active_hours") or "全天",
+                )
+        except Exception as e:
+            logger.error(f"自动打招呼启动失败: {e}")
+    else:
+        logger.info("自动打招呼已禁用（--no-greeting）")
     
     # 定义Flask运行函数
     ssl_context = None
@@ -660,6 +723,10 @@ def cleanup():
     """清理资源"""
     global service
     streaming.stop_streaming()
+    try:
+        greeting_worker.stop_greeter()
+    except Exception as e:
+        logger.warning(f"关闭自动打招呼失败: {e}")
     try:
         audio_ws.stop_audio_server()
     except Exception as e:
@@ -728,6 +795,11 @@ if __name__ == "__main__":
         "--no-audio",
         action="store_true",
         help="禁用语音对讲（监听车端声音 / 按住说话）"
+    )
+    parser.add_argument(
+        "--no-greeting",
+        action="store_true",
+        help="禁用自动打招呼（检测到人后说话 + 点头）"
     )
     parser.add_argument(
         "--audio-port",
@@ -802,6 +874,8 @@ if __name__ == "__main__":
             print("  - RTMP 视频推流")
         if not args.no_audio:
             print(f"  - 语音对讲（监听/对讲，WebSocket 端口 {args.audio_port or '8081'}）")
+        if not args.no_greeting:
+            print("  - 自动打招呼（有人进入视野 → 说话 + 点头）")
         print("按 Ctrl+C 停止服务")
         print("=========================")
     
@@ -812,6 +886,7 @@ if __name__ == "__main__":
             audio_port=args.audio_port,
             ssl_cert=args.ssl_cert,
             ssl_key=args.ssl_key,
+            greeting_enabled=not args.no_greeting,
         )
     except KeyboardInterrupt:
         if args.mcp_mode != 'stdio':

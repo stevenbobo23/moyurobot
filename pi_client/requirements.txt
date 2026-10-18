@@ -23,3 +23,10 @@ numpy>=1.24.0
 # === 工具库 ===
 python-dotenv>=1.0.0
 requests>=2.31.0
+
+# === 可选：自动打招呼的人体检测 ===
+# 把 YOLO 的 ONNX 模型放到 models/yolo11n.onnx 后：
+#   - 装了 onnxruntime  → 走 onnxruntime 推理（更快）
+#   - 没装             → 自动退回 cv2.dnn 推理（只要有 opencv 就能跑）
+# 两者都没有时：OpenCV 4.x 用 HOG 兜底，OpenCV 5.x 已移除 HOGDescriptor → 需要模型
+# onnxruntime>=1.16.0

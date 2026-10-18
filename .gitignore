@@ -51,3 +51,7 @@ htmlcov/
 # macOS
 .DS_Store
 
+# 自动打招呼的检测模型（本地放置，别入库：约 6~12MB 的二进制）
+pi_client/models/*.onnx
+pi_client/models/*.pt
+
