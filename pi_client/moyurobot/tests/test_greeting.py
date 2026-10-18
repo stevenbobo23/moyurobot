@@ -201,6 +201,19 @@ def test_env_override():
     check("比例阈值被正确解析", abs(cfg.min_person_ratio - 0.5) < 1e-9)
     check("非法手势回退到 nod", GreetingConfig.from_dict({"gesture": "跳舞"}).gesture == "nod")
 
+    # env 手滑写成越界值时要和 from_dict 一样被夹住：
+    # 否则 min_person_ratio=3 会让检测永不触发，且日志里看不出任何异常
+    bad = GreetingConfig.load(env={
+        "GREETING_MIN_PERSON_RATIO": "3",
+        "GREETING_CENTER_ZONE": "5",
+        "GREETING_YOLO_CONF": "1.5",
+        "GREETING_HOG_SCALE": "0.5",
+    })
+    check("env 比例阈值上限截断", bad.min_person_ratio == 1.0, str(bad.min_person_ratio))
+    check("env center_zone 上限截断", bad.center_zone == 1.0, str(bad.center_zone))
+    check("env yolo_conf 上限截断", bad.yolo_conf == 0.99, str(bad.yolo_conf))
+    check("env hog_scale 下限抬到 1.01", abs(bad.hog_scale - 1.01) < 1e-9, str(bad.hog_scale))
+
 
 def test_config_clamping():
     cfg = GreetingConfig.from_dict({"min_person_ratio": 5, "center_zone": 9,

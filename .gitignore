@@ -55,3 +55,8 @@ htmlcov/
 pi_client/models/*.onnx
 pi_client/models/*.pt
 
+# 自动打招呼的本地语音池：TTS 生成物或自己录的 wav，属本机资产（体积 + 个人录音），
+# 换机器时用脚本重新生成，或手动 scp 过去
+pi_client/assets/greetings/*.wav
+pi_client/assets/greetings/manifest.json
+

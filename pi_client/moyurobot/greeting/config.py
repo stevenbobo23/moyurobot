@@ -254,11 +254,13 @@ class GreetingConfig:
             if key in env and env[key] != "":
                 setattr(self, attr, as_bool(env[key], getattr(self, attr)))
 
-        def _float(key, attr, minimum=None):
+        def _float(key, attr, minimum=None, maximum=None):
             if env.get(key):
                 value = as_float(env[key], getattr(self, attr))
                 if minimum is not None:
                     value = max(minimum, value)
+                if maximum is not None:
+                    value = min(maximum, value)
                 setattr(self, attr, value)
 
         def _int(key, attr, minimum=None):
@@ -278,8 +280,12 @@ class GreetingConfig:
         _str("GREETING_MODEL_PATH", "model_path")
         _float("GREETING_DETECT_FPS", "detect_fps", 0.2)
         _int("GREETING_INPUT_SIZE", "input_size", 160)
-        _float("GREETING_MIN_PERSON_RATIO", "min_person_ratio", 0.01)
-        _float("GREETING_CENTER_ZONE", "center_zone", 0.1)
+        # 上限必须和 from_dict 保持一致：env 里手滑写成 2.0 会让检测永不触发，
+        # 而且不会有任何报错，属于最难查的一类配置事故
+        _float("GREETING_MIN_PERSON_RATIO", "min_person_ratio", 0.01, 1.0)
+        _float("GREETING_CENTER_ZONE", "center_zone", 0.1, 1.0)
+        _float("GREETING_YOLO_CONF", "yolo_conf", 0.05, 0.99)
+        _float("GREETING_HOG_SCALE", "hog_scale", 1.01, 2.0)
         _int("GREETING_TRIGGER_FRAMES", "trigger_frames", 1)
         _float("GREETING_TRIGGER_SECONDS", "trigger_seconds", 0.0)
         _float("GREETING_LEAVE_SECONDS", "leave_seconds", 0.5)
