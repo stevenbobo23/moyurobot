@@ -13,7 +13,6 @@ import random
 import time
 import cv2
 import numpy as np
-import base64
 import requests
 import json
 from typing import Dict, Any, Optional
@@ -773,12 +772,11 @@ def _capture_front_camera_image_internal(filename: Optional[str] = None) -> dict
             file_path = image_dir / f"{stem}_{counter}.jpg"
             counter += 1
         
-        logger.info("转换 BGR 到 RGB...")
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        success = cv2.imwrite(str(file_path), frame_rgb, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        # cv2.imwrite 需要 BGR；之前先转 RGB 再写会让红蓝通道互换（照片偏色）
+        success = cv2.imwrite(str(file_path), frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
         
         if success:
-            height, width = frame_rgb.shape[:2]
+            height, width = frame.shape[:2]
             file_size = file_path.stat().st_size
             
             logger.info(f"图片已保存: {file_path}")

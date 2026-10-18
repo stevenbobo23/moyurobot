@@ -214,7 +214,7 @@ PYTHONPATH=. python moyurobot/tests/test_audio_pipeline.py     # 端到端协议
 | `twist_waist` | 扭腰动作 |
 | `reset_arm` | 机械臂复位 |
 | `stand_at_attention` | 立正姿态 |
-| `capture_and_analyze_with_qwen` | 拍照并用千问 VL 分析 |
+| `capture_and_analyze` | 拍照并用视觉模型（默认 DeepSeek）分析 |
 | `get_robot_status` | 获取机器人状态 |
 | `set_speed_level` | 设置速度等级（slow/medium/fast） |
 
@@ -234,7 +234,7 @@ PYTHONPATH=. python moyurobot/tests/test_audio_pipeline.py     # 端到端协议
             "cwd": "/path/to/moyurobot/pi_client",
             "env": {
                 "ROBOT_ID": "my_awesome_kiwi",
-                "QWEN_API_KEY": "your-api-key",
+                "DEEPSEEK_API_KEY": "your-api-key",
                 "PYTHONPATH": "/path/to/moyurobot/pi_client"
             }
         }
@@ -269,7 +269,9 @@ PYTHONPATH=. python moyurobot/tests/test_audio_pipeline.py     # 端到端协议
 |------|------|--------|
 | `ROBOT_ID` | 机器人 ID（与校准文件匹配） | `my_awesome_kiwi` |
 | `FLASK_SECRET_KEY` | Flask 会话密钥 | 随机生成 |
-| `QWEN_API_KEY` | 阿里云千问 VL API Key（拍照分析） | - |
+| `DEEPSEEK_API_KEY` | DeepSeek Key（拍照分析默认用它，模型 `deepseek-flash` = V4.1-Flash） | - |
+| `VISION_PROVIDER` | `auto` / `deepseek` / `dashscope` | `auto` |
+| `QWEN_API_KEY` | 阿里云千问 VL Key（仅作回退，可不配） | - |
 | `MCP_ENDPOINT` | 远程 MCP 端点（如小智 AI） | - |
 | `RTMP_STREAM_URL` | RTMP 推流地址 | - |
 | `STREAMING_ENABLED` | 是否启用推流 | `false` |
