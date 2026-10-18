@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#080b10">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>摸鱼小车 · 遥控</title>
+<style>
+:root{
+  --bg:#080b10; --surface:#0f141c; --surface2:#151c26; --line:#222c3a;
+  --text:#e8eef7; --muted:#7b8b9f; --accent:#22d3ee; --danger:#f43f5e;
+  --ok:#34d399; --warn:#fbbf24;
+  --safe-b:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{
+  margin:0;padding:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",Arial,sans-serif;
+  -webkit-user-select:none;user-select:none;overscroll-behavior:none;
+}
+.app{
+  display:flex;flex-direction:column;height:100vh;height:100dvh;
+  width:100%;max-width:560px;margin:0 auto;background:var(--bg);position:relative;
+}
+
+/* ---------- 顶栏 ---------- */
+.bar{
+  flex:0 0 46px;display:flex;align-items:center;justify-content:space-between;
+  padding:0 12px;border-bottom:1px solid var(--line);background:var(--surface);
+}
+.brand{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;letter-spacing:.02em;}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--muted);transition:background .2s,box-shadow .2s;}
+.dot.on{background:var(--ok);box-shadow:0 0 8px rgba(52,211,153,.7);}
+.dot.off{background:var(--danger);box-shadow:0 0 8px rgba(244,63,94,.6);}
+.dot.wait{background:var(--warn);}
+.bar-right{display:flex;align-items:center;gap:10px;}
+.timer{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
+.exit{
+  border:1px solid var(--line);background:var(--surface2);color:var(--muted);
+  font-size:12px;padding:5px 10px;border-radius:7px;font-weight:500;
+}
+.exit:active{background:#1d2735;color:var(--text);}
+
+/* ---------- 画面 ---------- */
+.stage{
+  flex:0 0 38%;min-height:132px;position:relative;background:#000;overflow:hidden;
+  display:flex;align-items:center;justify-content:center;
+}
+.feed{width:100%;height:100%;object-fit:contain;display:block;}
+.stage-msg{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-size:12px;color:#5a6b80;pointer-events:none;text-align:center;padding:0 20px;
+}
+.stage-top{
+  position:absolute;top:8px;left:8px;right:8px;display:flex;align-items:center;gap:6px;
+}
+.chip{
+  border:1px solid rgba(255,255,255,.14);background:rgba(8,11,16,.6);
+  -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
+  color:#9fb0c4;font-size:11px;padding:4px 9px;border-radius:6px;font-weight:500;
+}
+.chip.on{color:#06222a;background:var(--accent);border-color:var(--accent);font-weight:700;}
+.spacer{flex:1;}
+.badge{
+  font-size:10px;padding:4px 8px;border-radius:6px;font-weight:600;
+  background:rgba(8,11,16,.6);border:1px solid rgba(255,255,255,.12);color:#9fb0c4;
+  -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
+}
+.badge.warn{color:#3d2c00;background:var(--warn);border-color:var(--warn);}
+
+/* 仅监控模式横幅 */
+.banner{
+  position:absolute;left:8px;right:8px;bottom:8px;display:none;
+  background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.4);
+  color:#f6d27a;font-size:11px;line-height:1.5;padding:6px 9px;border-radius:7px;
+  -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
+}
+.banner.show{display:block;}
+
+/* ---------- Tab ---------- */
+.tabs{
+  flex:0 0 44px;display:flex;border-bottom:1px solid var(--line);background:var(--surface);
+}
+.tab{
+  flex:1;border:0;background:transparent;color:var(--muted);font-size:13px;font-weight:600;
+  position:relative;letter-spacing:.02em;
+}
+.tab.active{color:var(--accent);}
+.tab.active::after{
+  content:"";position:absolute;left:50%;bottom:0;transform:translateX(-50%);
+  width:30%;height:2px;border-radius:2px 2px 0 0;background:var(--accent);
+  box-shadow:0 0 10px rgba(34,211,238,.7);
+}
+
+/* ---------- 面板 ---------- */
+.panel{flex:1 1 auto;min-height:0;position:relative;background:var(--bg);}
+.pane{display:none;height:100%;}
+.pane.active{display:flex;}
+
+/* 驾驶 */
+.pane[data-pane="drive"]{flex-direction:row;align-items:center;gap:12px;padding:12px 14px calc(12px + var(--safe-b));}
+.stick-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-width:0;}
+.stick{
+  position:relative;width:min(46vw,196px);aspect-ratio:1;border-radius:50%;
+  background:radial-gradient(circle at 50% 38%,#171f2a,#0b1016 72%);
+  border:1px solid var(--line);touch-action:none;
+  box-shadow:inset 0 2px 14px rgba(0,0,0,.7),0 0 0 5px rgba(34,211,238,.035);
+}
+.stick::before,.stick::after{
+  content:"";position:absolute;left:50%;top:50%;background:rgba(255,255,255,.055);
+}
+.stick::before{width:58%;height:1px;transform:translate(-50%,-50%);}
+.stick::after{height:58%;width:1px;transform:translate(-50%,-50%);}
+.knob{
+  position:absolute;left:50%;top:50%;width:60px;height:60px;margin:-30px 0 0 -30px;
+  border-radius:50%;background:linear-gradient(180deg,#2b3949,#19222d);
+  border:1px solid #35485e;box-shadow:0 5px 14px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.07);
+  display:flex;align-items:center;justify-content:center;will-change:transform;
+}
+.knob i{width:16px;height:16px;border-radius:50%;background:rgba(34,211,238,.18);
+  border:1px solid rgba(34,211,238,.5);display:block;}
+.stick.active .knob{border-color:var(--accent);box-shadow:0 0 20px rgba(34,211,238,.5),0 5px 14px rgba(0,0,0,.5);}
+.stick.active .knob i{background:rgba(34,211,238,.55);}
+.stick-hint{font-size:11px;color:#4e5c6e;letter-spacing:.02em;}
+
+/* 小屏（iPhone SE 一类）压缩摇杆，保证急停不被挤出屏幕 */
+@media (max-height:700px){
+  .stick{width:min(40vw,148px);}
+  .stick-hint{display:none;}
+  .stage{flex:0 0 34%;}
+}
+
+/* 右侧：速度 / 旋转 / 急停 —— 整体高度与摇杆对齐，视觉重心平衡 */
+.side-col{flex:0 0 96px;display:flex;flex-direction:column;justify-content:center;gap:9px;align-self:center;}
+.spd-box{
+  flex:0 0 auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;
+  padding:7px 9px 9px;
+}
+.spd-label{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:4px;}
+.spd-label b{color:var(--accent);font-variant-numeric:tabular-nums;}
+input[type=range]{
+  -webkit-appearance:none;appearance:none;width:100%;height:22px;background:transparent;margin:0;
+  touch-action:manipulation;
+}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:3px;background:#243040;}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:18px;height:18px;border-radius:50%;margin-top:-7px;
+  background:var(--accent);border:2px solid #06222a;box-shadow:0 0 8px rgba(34,211,238,.6);
+}
+input[type=range]::-moz-range-track{height:4px;border-radius:3px;background:#243040;}
+input[type=range]::-moz-range-thumb{width:18px;height:18px;border:2px solid #06222a;border-radius:50%;background:var(--accent);}
+
+.rot-row{display:flex;gap:9px;flex:0 0 44px;}
+.rot-btn{
+  flex:1;border:1px solid var(--line);background:var(--surface);color:#9fb0c4;
+  border-radius:10px;font-size:19px;line-height:1;display:flex;align-items:center;justify-content:center;
+  touch-action:none;
+}
+.rot-btn.pressed{background:#12303a;border-color:var(--accent);color:var(--accent);}
+.stop{
+  flex:0 0 76px;border:1px solid rgba(244,63,94,.45);background:rgba(244,63,94,.13);
+  color:#ff8fa0;border-radius:12px;font-size:15px;font-weight:800;letter-spacing:.08em;
+  display:flex;align-items:center;justify-content:center;touch-action:none;
+  box-shadow:inset 0 0 20px rgba(244,63,94,.08);
+}
+.stop:active{background:var(--danger);color:#fff;border-color:var(--danger);}
+
+/* 机械臂 */
+.pane[data-pane="arm"]{flex-direction:column;padding:8px 12px calc(10px + var(--safe-b));overflow-y:auto;-webkit-overflow-scrolling:touch;}
+.arm-top{display:flex;gap:8px;margin-bottom:2px;flex:0 0 auto;}
+.arm-top button{
+  flex:1;border:1px solid var(--line);background:var(--surface);color:#9fb0c4;
+  font-size:11px;padding:7px 0;border-radius:8px;font-weight:600;
+}
+.arm-top button:active{background:#1d2735;color:var(--text);}
+.joint{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid rgba(34,44,58,.55);}
+.joint:last-child{border-bottom:0;}
+.j-name{flex:1;font-size:12.5px;color:#b9c7d8;}
+.j-val{width:46px;text-align:right;font-size:12px;color:var(--accent);
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums;}
+.j-btn{
+  width:42px;height:38px;border:1px solid var(--line);background:var(--surface2);color:#c3d1e0;
+  border-radius:9px;font-size:19px;line-height:1;display:flex;align-items:center;justify-content:center;
+  touch-action:none;flex:0 0 auto;
+}
+.j-btn:active{background:#12303a;border-color:var(--accent);color:var(--accent);}
+
+/* 动作 */
+.pane[data-pane="act"]{flex-direction:column;padding:10px 12px calc(10px + var(--safe-b));overflow-y:auto;-webkit-overflow-scrolling:touch;}
+.act-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:9px;}
+.act-card{
+  border:1px solid var(--line);background:var(--surface);border-radius:11px;
+  padding:12px 10px;display:flex;align-items:center;gap:10px;text-align:left;
+}
+.act-card:active{background:#14202b;border-color:#2c4457;}
+.act-ico{font-size:20px;line-height:1;}
+.act-txt{display:flex;flex-direction:column;gap:2px;min-width:0;}
+.act-name{font-size:13px;font-weight:600;color:#dbe6f2;}
+.act-desc{font-size:10px;color:#5d6e82;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.act-stop{
+  margin-top:10px;border:1px solid rgba(244,63,94,.4);background:rgba(244,63,94,.1);
+  color:#ff8fa0;border-radius:10px;padding:12px;font-size:13px;font-weight:700;
+}
+.act-stop:active{background:var(--danger);color:#fff;}
+
+/* toast */
+.toast{
+  position:absolute;left:50%;bottom:calc(14px + var(--safe-b));transform:translate(-50%,8px);
+  background:rgba(18,24,33,.95);border:1px solid var(--line);color:#dbe6f2;
+  font-size:12px;padding:8px 14px;border-radius:9px;opacity:0;pointer-events:none;
+  transition:opacity .18s,transform .18s;max-width:86%;text-align:center;z-index:30;
+}
+.toast.show{opacity:1;transform:translate(-50%,0);}
+.toast.err{border-color:rgba(244,63,94,.5);color:#ffa8b6;}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="bar">
+    <div class="brand"><span class="dot wait" id="conn-dot"></span><span>摸鱼小车</span></div>
+    <div class="bar-right">
+      <span class="timer" id="timer">00:00</span>
+      <button class="exit" id="btn-exit">退出</button>
+    </div>
+  </header>
+
+  <section class="stage">
+    <img class="feed" id="feed" alt="">
+    <div class="stage-msg" id="stage-msg">正在连接画面…</div>
+    <div class="stage-top">
+      <button class="chip on" id="cam-front" data-cam="front">前置</button>
+      <button class="chip" id="cam-wrist" data-cam="wrist">手腕</button>
+      <span class="spacer"></span>
+      <span class="badge" id="link-badge">连接中</span>
+    </div>
+    <div class="banner" id="banner">当前为<b>仅监控模式</b>，控制指令会被拒绝。请到控制台点「启用控制模式」。</div>
+  </section>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="drive">驾驶</button>
+    <button class="tab" data-tab="arm">机械臂</button>
+    <button class="tab" data-tab="act">动作</button>
+  </nav>
+
+  <main class="panel">
+
+    <section class="pane active" data-pane="drive">
+      <div class="stick-col">
+        <div class="stick" id="stick"><div class="knob" id="knob"><i></i></div></div>
+        <div class="stick-hint" id="stick-hint">推杆移动 · 松手即停</div>
+      </div>
+      <div class="side-col">
+        <div class="spd-box">
+          <div class="spd-label"><span>速度</span><b id="spd-val">60%</b></div>
+          <input type="range" id="spd" min="20" max="100" step="5" value="60">
+        </div>
+        <div class="rot-row">
+          <button class="rot-btn" id="rot-l" data-rot="-1">↺</button>
+          <button class="rot-btn" id="rot-r" data-rot="1">↻</button>
+        </div>
+        <button class="stop" id="btn-stop">急停</button>
+      </div>
+    </section>
+
+    <section class="pane" data-pane="arm">
+      <div class="arm-top">
+        <button id="arm-sync">同步当前</button>
+        <button id="arm-home">归位</button>
+      </div>
+      <div id="joints"></div>
+    </section>
+
+    <section class="pane" data-pane="act">
+      <div class="act-grid" id="act-grid">
+        <div style="grid-column:1/-1;text-align:center;color:#4e5c6e;font-size:12px;padding:18px 0;">动作加载中…</div>
+      </div>
+      <button class="act-stop" id="act-stop">停止当前动作</button>
+    </section>
+
+  </main>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+(function(){
+'use strict';
+
+/* ================= 环境 ================= */
+var QS   = new URLSearchParams(location.search);
+var BASE = (QS.get('base') || '').replace(/\/+$/, '');   // 默认同源
+var DEMO = QS.get('demo') === '1';
+
+/* 机器人侧常量（来源 core/config.py） */
+var LINEAR_SPEED = 0.2;   // m/s
+var ANGULAR_SPEED = 30;   // deg/s
+var SEND_MS      = 100;   // 10Hz
+var DEADMAN_MS   = 350;   // 客户端失联自动停车（服务端为 6s，此处更保守）
+
+/* ================= DOM ================= */
+var $ = function(s){ return document.querySelector(s); };
+var feed = $('#feed'), stageMsg = $('#stage-msg'), banner = $('#banner');
+var connDot = $('#conn-dot'), linkBadge = $('#link-badge'), timerEl = $('#timer');
+var stick = $('#stick'), knob = $('#knob'), stickHint = $('#stick-hint');
+var spdInput = $('#spd'), spdVal = $('#spd-val');
+var toastEl = $('#toast');
+
+/* ================= 状态 ================= */
+var st = {
+  x: 0, y: 0, theta: 0,
+  speed: 0.6,
+  stickActive: false,
+  rotDir: 0,
+  lastSent: 0,
+  connected: false,
+  movementEnabled: true,
+  camera: 'front',
+  startedAt: Date.now()
+};
+
+/* ================= 网络 ================= */
+function post(path, body){
+  if (DEMO) return Promise.resolve({ success: true });
+  return fetch(BASE + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}),
+    cache: 'no-store'
+  }).then(function(r){ return r.json(); });
+}
+
+function getJSON(path){
+  if (DEMO) return Promise.resolve(null);
+  return fetch(BASE + path, { cache: 'no-store' }).then(function(r){ return r.json(); });
+}
+
+/* ================= toast ================= */
+var toastTimer = null;
+function toast(msg, isErr){
+  toastEl.textContent = msg;
+  toastEl.className = 'toast show' + (isErr ? ' err' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function(){ toastEl.className = 'toast'; }, 2200);
+}
+
+/* ================= 画面 ================= */
+var feedRetry = null, feedHide = null;
+function loadFeed(cam){
+  st.camera = cam;
+  stageMsg.textContent = '正在连接画面…';
+  stageMsg.style.display = 'flex';
+  feed.style.display = 'block';
+  // 加时间戳，强制重新拉流（MJPEG 断流后必须重置 src 才能重连）
+  feed.src = BASE + '/video_feed/' + cam + '?t=' + Date.now();
+  // MJPEG 不会触发 load 事件（流不结束），所以用定时器收掉提示
+  clearTimeout(feedHide);
+  feedHide = setTimeout(function(){ stageMsg.style.display = 'none'; }, 1500);
+}
+feed.addEventListener('load', function(){
+  clearTimeout(feedHide);
+  stageMsg.style.display = 'none';
+});
+feed.addEventListener('error', function(){
+  clearTimeout(feedHide);
+  stageMsg.textContent = '画面连接失败，正在重试…';
+  stageMsg.style.display = 'flex';
+  clearTimeout(feedRetry);
+  feedRetry = setTimeout(function(){ loadFeed(st.camera); }, 2500);
+});
+
+document.querySelectorAll('[data-cam]').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    document.querySelectorAll('[data-cam]').forEach(function(b){ b.classList.remove('on'); });
+    btn.classList.add('on');
+    loadFeed(btn.dataset.cam);
+  });
+});
+
+/* ================= 状态轮询 ================= */
+function pollStatus(){
+  if (DEMO){ setConnected(true, true); return; }
+  getJSON('/status').then(function(d){
+    if (!d){ return; }
+    var ok = !!d.connected;
+    setConnected(ok, d.movement_enabled !== false);
+    if (ok && d.current_action && !armDirty) syncArmFromStatus(d.current_action);
+  }).catch(function(){
+    setConnected(false, st.movementEnabled);
+  });
+}
+
+function setConnected(ok, movementOk){
+  st.connected = ok;
+  st.movementEnabled = movementOk;
+  connDot.className = 'dot ' + (ok ? 'on' : 'off');
+  linkBadge.textContent = ok ? '已连接' : '离线';
+  linkBadge.className = 'badge' + (ok ? '' : ' warn');
+  banner.classList.toggle('show', ok && !movementOk);
+  if (!ok){
+    stageMsg.textContent = '机器人在线状态异常';
+    stageMsg.style.display = 'flex';
+  }
+}
+
+/* ================= 摇杆 ================= */
+var geom = { r: 0, max: 0 };
+function measure(){
+  var rect = stick.getBoundingClientRect();
+  geom.r = rect.width / 2;
+  geom.max = geom.r - knob.offsetWidth / 2 - 6;
+}
+measure();
+window.addEventListener('resize', function(){ setTimeout(measure, 120); });
+window.addEventListener('orientationchange', function(){ setTimeout(measure, 260); });
+
+var drag = { id: null, cx: 0, cy: 0 };
+
+function setKnob(dx, dy){
+  knob.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+}
+
+function stickStart(e){
+  if (drag.id !== null) return;
+  drag.id = e.pointerId;
+  var rect = stick.getBoundingClientRect();
+  drag.cx = rect.left + rect.width / 2;
+  drag.cy = rect.top + rect.height / 2;
+  stick.classList.add('active');
+  st.stickActive = true;
+  try { stick.setPointerCapture(e.pointerId); } catch(_){}
+  stickMove(e);
+}
+
+function stickMove(e){
+  if (drag.id === null || e.pointerId !== drag.id) return;
+  var dx = e.clientX - drag.cx;
+  var dy = e.clientY - drag.cy;
+  var len = Math.hypot(dx, dy);
+  var max = geom.max || 1;
+  if (len > max){ dx = dx / len * max; dy = dy / len * max; }
+  setKnob(dx, dy);
+
+  var nx = dx / max;   // -1..1（右为正）
+  var ny = dy / max;   // -1..1（下为正）
+  var mag = Math.hypot(nx, ny);
+
+  if (mag < 0.12){          // 死区
+    st.x = 0; st.y = 0;
+    return;
+  }
+  // 屏幕向上 → 前进；向左 → 左平移（LeKiwi 的 y.vel 正值为左）
+  var scale = st.speed;
+  st.x = (-ny) * LINEAR_SPEED * scale;
+  st.y = (-nx) * LINEAR_SPEED * scale;
+}
+
+function stickEnd(e){
+  if (drag.id === null) return;
+  if (e.pointerId !== undefined && e.pointerId !== drag.id) return;
+  drag.id = null;
+  st.stickActive = false;
+  st.x = 0; st.y = 0;
+  stick.classList.remove('active');
+  setKnob(0, 0);
+  sendNow();   // 立即发一次零速
+}
+
+stick.addEventListener('pointerdown', stickStart);
+stick.addEventListener('pointermove', stickMove);
+stick.addEventListener('pointerup', stickEnd);
+stick.addEventListener('pointercancel', stickEnd);
+
+/* ================= 旋转 ================= */
+document.querySelectorAll('[data-rot]').forEach(function(btn){
+  var dir = Number(btn.dataset.rot);
+  function down(e){
+    e.preventDefault();
+    st.rotDir = dir;
+    btn.classList.add('pressed');
+    st.theta = dir * ANGULAR_SPEED * st.speed;
+    sendNow();
+  }
+  function up(e){
+    if (st.rotDir !== dir) return;
+    st.rotDir = 0;
+    btn.classList.remove('pressed');
+    st.theta = 0;
+    sendNow();
+  }
+  btn.addEventListener('pointerdown', down);
+  btn.addEventListener('pointerup', up);
+  btn.addEventListener('pointercancel', up);
+  btn.addEventListener('pointerleave', up);
+});
+
+/* ================= 发送循环 ================= */
+var inFlight = false;
+
+function sendNow(){
+  st.lastSent = Date.now();
+  if (!st.connected && !DEMO) return;
+  if (inFlight) return;
+  inFlight = true;
+  post('/control', {
+    x_vel: round4(st.x),
+    y_vel: round4(st.y),
+    theta_vel: round4(st.theta)
+  }).then(function(d){
+    if (d && d.success === false){
+      toast(d.message || '指令被拒绝', true);
+    }
+  }).catch(function(){
+    // 网络抖动不弹窗，避免刷屏
+  }).then(function(){ inFlight = false; });
+}
+
+function round4(v){ return Math.round(v * 10000) / 10000; }
+
+setInterval(function(){
+  var now = Date.now();
+  var moving = st.stickActive || st.rotDir !== 0;
+  if (moving || now - st.lastSent < DEADMAN_MS){
+    if (moving) sendNow();
+  } else if (now - st.lastSent >= DEADMAN_MS && (st.x || st.y || st.theta)){
+    // 失联兜底：清速
+    st.x = 0; st.y = 0; st.theta = 0;
+    sendNow();
+  }
+}, SEND_MS);
+
+/* 页面切走/关闭时立刻停车 */
+function emergencyStop(){
+  st.x = 0; st.y = 0; st.theta = 0; st.stickActive = false; st.rotDir = 0;
+  setKnob(0, 0);
+  stick.classList.remove('active');
+  post('/control', { x_vel: 0, y_vel: 0, theta_vel: 0 });
+}
+document.addEventListener('visibilitychange', function(){
+  if (document.hidden) emergencyStop();
+});
+window.addEventListener('pagehide', emergencyStop);
+
+$('#btn-stop').addEventListener('pointerdown', function(e){
+  e.preventDefault();
+  emergencyStop();
+  post('/action/stop', {}).catch(function(){});
+  toast('已急停');
+});
+
+/* ================= 速度 ================= */
+spdInput.addEventListener('input', function(){
+  st.speed = Number(spdInput.value) / 100;
+  spdVal.textContent = spdInput.value + '%';
+});
+
+/* ================= 机械臂 ================= */
+var JOINTS = [
+  { key: 'arm_shoulder_pan.pos',  name: '肩部水平' },
+  { key: 'arm_shoulder_lift.pos', name: '肩部垂直' },
+  { key: 'arm_elbow_flex.pos',    name: '肘关节'   },
+  { key: 'arm_wrist_flex.pos',    name: '腕部弯曲' },
+  { key: 'arm_wrist_roll.pos',    name: '腕部旋转' },
+  { key: 'arm_gripper.pos',       name: '夹爪'     }
+];
+var STEP = 0.06;         // 单次微调幅度（弧度）
+var armVal = {};         // 本地跟踪的当前位置
+var armDirty = false;
+
+var jointsEl = $('#joints');
+JOINTS.forEach(function(j){
+  armVal[j.key] = 0;
+  var row = document.createElement('div');
+  row.className = 'joint';
+  row.innerHTML =
+    '<span class="j-name">' + j.name + '</span>' +
+    '<button class="j-btn" data-dec="' + j.key + '">−</button>' +
+    '<span class="j-val" data-val="' + j.key + '">0.00</span>' +
+    '<button class="j-btn" data-inc="' + j.key + '">+</button>';
+  jointsEl.appendChild(row);
+});
+
+function renderJoint(key){
+  var el = jointsEl.querySelector('[data-val="' + key + '"]');
+  if (el) el.textContent = armVal[key].toFixed(2);
+}
+
+function pushJoint(key){
+  armDirty = true;
+  var body = {};
+  body[key] = Math.round(armVal[key] * 1000) / 1000;
+  post('/control', body).then(function(d){
+    if (d && d.success === false) toast(d.message || '机械臂指令失败', true);
+  }).catch(function(){ toast('网络异常', true); });
+}
+
+function nudge(key, dir){
+  // 实测 jog 范围约 ±3.4 rad（shoulder_lift 现场值 3.41），钳到 ±3.6 避免微调时跳变
+  armVal[key] = Math.max(-3.6, Math.min(3.6, armVal[key] + dir * STEP));
+  renderJoint(key);
+  pushJoint(key);
+}
+
+var holdTimer = null, holdRepeat = null;
+function bindHold(selector, handler){
+  jointsEl.querySelectorAll(selector).forEach(function(btn){
+    var key = btn.dataset.inc || btn.dataset.dec;
+    var dir = btn.dataset.inc ? 1 : -1;
+    function start(e){
+      e.preventDefault();
+      handler(key, dir);
+      clearTimeout(holdTimer); clearInterval(holdRepeat);
+      holdTimer = setTimeout(function(){
+        holdRepeat = setInterval(function(){ handler(key, dir); }, 130);
+      }, 380);
+    }
+    function stop(){
+      clearTimeout(holdTimer); clearInterval(holdRepeat);
+      armDirty = false;
+    }
+    btn.addEventListener('pointerdown', start);
+    btn.addEventListener('pointerup', stop);
+    btn.addEventListener('pointercancel', stop);
+    btn.addEventListener('pointerleave', stop);
+  });
+}
+bindHold('[data-inc]', nudge);
+bindHold('[data-dec]', nudge);
+
+function syncArmFromStatus(action){
+  JOINTS.forEach(function(j){
+    if (typeof action[j.key] === 'number'){
+      armVal[j.key] = action[j.key];
+      renderJoint(j.key);
+    }
+  });
+}
+
+$('#arm-sync').addEventListener('click', function(){
+  if (DEMO){ toast('演示模式'); return; }
+  getJSON('/status').then(function(d){
+    if (d && d.current_action){
+      syncArmFromStatus(d.current_action);
+      toast('已同步');
+    }
+  }).catch(function(){ toast('同步失败', true); });
+});
+
+$('#arm-home').addEventListener('click', function(){
+  // 回到全零位（桌面端的「归位」同样是发零位）
+  var body = {};
+  JOINTS.forEach(function(j){ body[j.key] = 0; armVal[j.key] = 0; renderJoint(j.key); });
+  post('/control', body).then(function(d){
+    if (d && d.success === false) toast(d.message || '归位失败', true);
+    else toast('已归位');
+  }).catch(function(){ toast('网络异常', true); });
+});
+
+/* ================= 预设动作 ================= */
+function loadActions(){
+  if (DEMO){
+    renderActions([
+      { id:'wave', name:'挥手', icon:'👋', description:'抬起手臂左右挥动三下' },
+      { id:'nod', name:'点头', icon:'🙂', description:'腕关节上下摆动三次' },
+      { id:'shake_head', name:'摇头', icon:'🙈', description:'腕关节左右摆动三次' },
+      { id:'twist', name:'扭腰', icon:'🌀', description:'肩膀左右摆动' },
+      { id:'salute', name:'敬礼', icon:'🫡', description:'抬手到眉梢敬个礼' },
+      { id:'bow', name:'鞠躬', icon:'🙇', description:'手臂前压，行个礼' }
+    ]);
+    return;
+  }
+  getJSON('/actions').then(function(d){
+    if (d && d.success && d.actions && d.actions.length){
+      renderActions(d.actions);
+    } else {
+      $('#act-grid').innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#4e5c6e;font-size:12px;padding:18px 0;">暂无可用动作</div>';
+    }
+  }).catch(function(){
+    $('#act-grid').innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#4e5c6e;font-size:12px;padding:18px 0;">动作加载失败</div>';
+  });
+}
+
+function renderActions(list){
+  var grid = $('#act-grid');
+  grid.innerHTML = '';
+  list.forEach(function(a){
+    var b = document.createElement('button');
+    b.className = 'act-card';
+    b.innerHTML =
+      '<span class="act-ico">' + (a.icon || '✨') + '</span>' +
+      '<span class="act-txt"><span class="act-name">' + (a.name || a.id) + '</span>' +
+      '<span class="act-desc">' + (a.description || '') + '</span></span>';
+    b.addEventListener('click', function(){
+      post('/action/run', { action_id: a.id }).then(function(d){
+        if (d && d.success === false) toast(d.message || '动作启动失败', true);
+        else toast('执行：' + (a.name || a.id));
+      }).catch(function(){ toast('网络异常', true); });
+    });
+    grid.appendChild(b);
+  });
+}
+loadActions();
+
+$('#act-stop').addEventListener('click', function(){
+  post('/action/stop', {}).then(function(d){
+    if (d && d.success === false) toast(d.message || '停止失败', true);
+    else toast('已停止动作');
+  }).catch(function(){ toast('网络异常', true); });
+});
+
+/* ================= Tab ================= */
+document.querySelectorAll('.tab').forEach(function(tab){
+  tab.addEventListener('click', function(){
+    document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('active'); });
+    document.querySelectorAll('.pane').forEach(function(p){ p.classList.remove('active'); });
+    tab.classList.add('active');
+    var pane = document.querySelector('.pane[data-pane="' + tab.dataset.tab + '"]');
+    if (pane) pane.classList.add('active');
+    if (tab.dataset.tab === 'drive'){
+      setTimeout(measure, 30);
+    }
+    if (tab.dataset.tab !== 'drive') emergencyStop();  // 离开驾驶页一定停车
+  });
+});
+
+/* ================= 计时 ================= */
+setInterval(function(){
+  var s = Math.floor((Date.now() - st.startedAt) / 1000);
+  var m = Math.floor(s / 60);
+  timerEl.textContent = String(m).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+}, 1000);
+
+/* ================= 退出 ================= */
+$('#btn-exit').addEventListener('click', function(){
+  emergencyStop();
+  post('/exit_control', {}).then(function(d){
+    if (d && d.success === false) toast(d.message || '退出失败', true);
+    else { toast('已退出控制'); setTimeout(function(){ location.href = BASE + '/'; }, 700); }
+  }).catch(function(){ location.href = BASE + '/'; });
+});
+
+/* ================= 启动 ================= */
+/* 支持 ?tab=arm|act 深链，小程序可以直接落到某个页签 */
+var initTab = QS.get('tab');
+if (initTab){
+  var tb = document.querySelector('.tab[data-tab="' + initTab + '"]');
+  var pn = document.querySelector('.pane[data-pane="' + initTab + '"]');
+  if (tb && pn){
+    document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('active'); });
+    document.querySelectorAll('.pane').forEach(function(p){ p.classList.remove('active'); });
+    tb.classList.add('active');
+    pn.classList.add('active');
+  }
+}
+
+/* 刻意不自动调用 /startmove：那等于绕过后台的「启用控制模式」开关。
+   车能不能动，必须由管理员在控制台上显式决定，这里只做只读提示。 */
+loadFeed('front');
+pollStatus();
+setInterval(pollStatus, 2000);
+
+if (DEMO){
+  stageMsg.textContent = '演示模式 · 未连接真实机器人';
+  stageMsg.style.display = 'flex';
+  feed.style.display = 'none';
+  setConnected(true, true);
+  timerEl.textContent = '00:00';
+}
+})();
+</script>
+</body>
+</html>
