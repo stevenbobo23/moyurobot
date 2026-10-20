@@ -430,6 +430,7 @@ function stickStart(e){
   drag.cy = rect.top + rect.height / 2;
   stick.classList.add('active');
   st.stickActive = true;
+  zeroBudget = 3;   // 手指重新按下 → 零速补发额度恢复（见 sendNow 的 zeroBudget）
   try { stick.setPointerCapture(e.pointerId); } catch(_){}
   stickMove(e);
 }
@@ -447,8 +448,19 @@ function stickMove(e){
   var ny = dy / max;   // -1..1（下为正）
   var mag = Math.hypot(nx, ny);
 
-  if (mag < 0.12){          // 死区
+  if (mag < 0.12){          // 死区：摇杆已回到中心
+    /**
+     * 回中心 = 必须立刻停车。
+     *
+     * 原来这里只清 `st.x/st.y` 然后 return，指望 100ms 的发送节拍把零速带出去 ——
+     * 那一帧里机器人还在按上一帧的速度走（实测能滑出去半米）；
+     * 而且如果那一刻正好有包在飞，零速包会被 sendNow 的 inFlight 挡掉（见 sendNow 注释），
+     * 车会一直照最后一条非零指令跑，直到服务端 deadman 才停。
+     * 所以：只要「刚才在动」，回中心这一下就自己发一次零速，不等节拍。
+     */
+    var wasMoving = !!(st.x || st.y);
     st.x = 0; st.y = 0;
+    if (wasMoving) sendNow();
     return;
   }
   // 屏幕向上 → 前进；向左 → 左平移（LeKiwi 的 y.vel 正值为左）
@@ -478,6 +490,7 @@ document.querySelectorAll('[data-rot]').forEach(function(btn){
   var dir = Number(btn.dataset.rot);
   function down(e){
     e.preventDefault();
+    zeroBudget = 3;
     st.rotDir = dir;
     btn.classList.add('pressed');
     st.theta = dir * ANGULAR_SPEED * st.speed;
@@ -499,10 +512,31 @@ document.querySelectorAll('[data-rot]').forEach(function(btn){
 /* ================= 发送循环 ================= */
 var inFlight = false;
 
+/**
+ * 零速包的「补发券」。
+ *
+ * 坑：`sendNow` 有 `if (inFlight) return;` —— 10Hz 循环下几乎总有请求在飞，
+ * 而**最需要送达的恰恰是零速包**（松手、回中心、松开转向）。它被挡掉之后：
+ *   ① `st.lastSent` 已经被更新、`st.x/y/theta` 也清了；
+ *   ② 循环里 `moving` 为 false、那条「失联兜底」又要求 `st.x||st.y||st.theta` 非零；
+ *   ③ 于是再也不会有第二次发送机会 —— 机器人停在最后一条非零指令上，
+ *      只能等服务端 deadman。
+ * 所以：零速包被挡下就记一笔，上一包一回来立刻补发（补发时值已经是 0，必定是零速）。
+ */
+var queuedZero = false;
+/** 零速包发送失败标记（失败才吃补发额度，被 inFlight 挡下的不算） */
+var retryZero = false;
+/** 零速补发额度：手指重新按下时重置，避免网络真挂了还在无限重试 */
+var zeroBudget = 3;
+
 function sendNow(){
   st.lastSent = Date.now();
   if (!st.connected && !DEMO) return;
-  if (inFlight) return;
+  var isZero = !st.x && !st.y && !st.theta;
+  if (inFlight){
+    if (isZero) queuedZero = true;
+    return;
+  }
   inFlight = true;
   post('/control', {
     x_vel: round4(st.x),
@@ -513,8 +547,21 @@ function sendNow(){
       toast(d.message || '指令被拒绝', true);
     }
   }).catch(function(){
-    // 网络抖动不弹窗，避免刷屏
-  }).then(function(){ inFlight = false; });
+    // 网络抖动不弹窗，避免刷屏；但**零速包不能就这么算了**（车会一直走）
+    if (isZero && zeroBudget > 0) retryZero = true;
+  }).then(function(){
+    inFlight = false;
+    /*
+     * 两条补发来源合并处理：
+     *   queuedZero —— 被 `if (inFlight) return` 挡下的零速包（不吃额度，它本来就没发出去）
+     *   retryZero  —— 真的发失败了的零速包（吃额度，防止网络长期挂着无限重试）
+     * 此刻 st 仍然是 0，所以补发出去的包一定就是停车指令。
+     */
+    var again = queuedZero;
+    queuedZero = false;
+    if (retryZero){ retryZero = false; zeroBudget--; again = true; }
+    if (again) sendNow();
+  });
 }
 
 function round4(v){ return Math.round(v * 10000) / 10000; }
