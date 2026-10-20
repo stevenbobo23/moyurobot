@@ -44,6 +44,7 @@ moyurobot/
 │   │   └── web/            # Web 控制器
 │   │       ├── controller.py   # HTTP 路由
 │   │       ├── audio_ws.py     # 音频 WebSocket 服务
+│   │       ├── site_verify.py  # 域名校验文件（/<名字>.txt）
 │   │       ├── session.py      # 会话/排队管理
 │   │       ├── streaming.py    # RTMP 推流
 │   │       ├── templates/      # HTML 模板
@@ -51,6 +52,7 @@ moyurobot/
 │   ├── config/             # 配置文件
 │   │   ├── default.json    # 默认配置（含 audio 段）
 │   │   └── env.example     # 环境变量模板
+│   ├── public/             # 站点根目录下的公开文件（微信域名校验 txt 等）
 │   ├── docs/               # 详细文档（语音对讲等）
 │   ├── scripts/            # 启动脚本 + 音频自检 / 自签证书
 │   ├── setup.py            # Python 包安装
@@ -303,6 +305,34 @@ PYTHONPATH=. python moyurobot/tests/test_audio_pipeline.py     # 端到端协议
     }
 }
 ```
+
+## 🔏 域名校验文件（小程序业务域名 / 支付授权目录）
+
+微信要求把平台下发的校验文件放在**站点根目录**并能直接访问。本项目的做法是：
+
+```bash
+# 把平台给的 txt 丢进这个目录即可，不用改代码、不用重启以外的操作
+pi_client/public/
+└── ChC4AVj1oJ.txt        # 文件名保持平台给的原样
+```
+
+服务会自动以 `/<文件名>.txt` 暴露它们：
+
+```bash
+curl -i https://lerobot.mycodebro.cn/ChC4AVj1oJ.txt
+# HTTP/2 200
+# content-type: text/plain; charset=utf-8
+# content-length: 32
+# 230bf6a07a9c486547c2bbea1dfe58e3
+```
+
+几个约束（代码里已经卡死，避免变成任意文件读取）：
+
+- 只服务 `public/` 下真实存在的 `.txt`，不列目录；
+- 文件名只允许字母、数字、`-`、`_`，首字符必须是字母或数字，`..` 和斜杠进不来；
+- 直接回原始字节，不做编码转换，不会多出换行或 BOM。
+
+> 换域名或平台重新下发文件时，只需替换 `public/` 里的文件；路由是通配的，不绑定具体文件名。
 
 ## 🐛 故障排除
 

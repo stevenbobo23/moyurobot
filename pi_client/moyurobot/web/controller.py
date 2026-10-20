@@ -44,6 +44,7 @@ from moyurobot.web.session import (
 )
 from moyurobot.web import streaming
 from moyurobot.web import audio_ws
+from moyurobot.web import site_verify
 from moyurobot.logging_setup import setup_logging
 from moyurobot.greeting import worker as greeting_worker
 
@@ -108,6 +109,9 @@ def _index_context(username, user_id=None):
 def setup_routes():
     """设置HTTP路由"""
     global app, service, logger
+
+    # 平台域名校验文件（/<名字>.txt ← pi_client/public/），必须挂在根路径
+    site_verify.register(app)
 
     @app.route('/')
     def index():
