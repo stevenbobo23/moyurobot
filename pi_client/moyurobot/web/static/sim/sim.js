@@ -118,6 +118,29 @@ function setStatus(text, kind = "idle") {
   el.dataset.kind = kind;
 }
 
+// ---------------------------------------------------------------- 模型地址
+// 16MB 的模型走 COS + CDN，不再从树莓派的上传带宽里挤；仓库里那份保留作源文件
+// （改模型后跑 tools/upload_sim_models.py 重新上传）。
+// 局域网直连 Pi 时读本地反而更快，所以按 hostname 自动选。
+const MODEL_BASES = {
+  cdn: "https://image.mycodebro.cn/moyurobot/sim",
+  local: "/static/sim/models",
+};
+
+function pickModelBase() {
+  if (window.SIM_MODEL_BASE) return window.SIM_MODEL_BASE; // 调试可强制指定
+  const h = location.hostname;
+  const isLan =
+    h === "localhost" ||
+    h === "127.0.0.1" ||
+    h === "::1" ||
+    /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h);
+  return isLan ? MODEL_BASES.local : MODEL_BASES.cdn;
+}
+
+let MODEL_BASE = pickModelBase(); // bootModel 里可能改成兜底来源
+console.debug("[sim] 模型来源:", MODEL_BASE);
+
 const loader = new URDFLoader();
 // URDFLoader 的 onComplete 在网格（STL）还没下载完时就回调了，此时包围盒是空的。
 // 用 LoadingManager 等网格落地再取景。
@@ -179,9 +202,9 @@ manager.onLoad = () => fitAndStyle();
 setTimeout(() => {
   if (fitLocked) return;
   if (!robot) {
-    setStatus("URDF 没取到（/static/sim/models/so101.urdf 404？）", "error");
+    setStatus(`URDF 没取到（${MODEL_BASE}/so101.urdf）`, "error");
   } else if (failedUrls.length) {
-    setStatus(`网格缺失 ${failedUrls.length} 个，检查 /static/sim/models/assets/`, "error");
+    setStatus(`网格缺失 ${failedUrls.length} 个，检查 ${MODEL_BASE}/assets/`, "error");
   } else {
     setStatus("网格迟迟没到齐（网络慢或路径不对）", "warn");
   }
@@ -315,31 +338,66 @@ function fitAndStyle({ provisional = false } = {}) {
 
 manager.onLoad = fitAndStyle;
 
-loader.load(
-  "/static/sim/models/so101.urdf",
-  (model) => {
-    robot = model;
-    // URDF 是 ROS 惯例（Z 朝上），转成 three 的 Y 朝上
-    robot.rotation.x = -Math.PI / 2;
-    scene.add(robot);
-    robot.updateMatrixWorld(true);
+function loadURDF(base) {
+  return new Promise((resolve, reject) => {
+    loader.load(
+      `${base}/so101.urdf`,
+      resolve,
+      undefined,
+      (err) => reject(err || new Error("URDF 加载失败"))
+    );
+  });
+}
 
-    for (const [name, joint] of Object.entries(robot.joints || {})) {
-      if (joint.jointType === "revolute" || joint.jointType === "continuous") {
-        jointLimits[name] = {
-          lower: joint.limit?.lower !== undefined ? Number(joint.limit.lower) : -Math.PI,
-          upper: joint.limit?.upper !== undefined ? Number(joint.limit.upper) : Math.PI,
-        };
-      }
+function initRobot(model) {
+  robot = model;
+  // URDF 是 ROS 惯例（Z 朝上），转成 three 的 Y 朝上
+  robot.rotation.x = -Math.PI / 2;
+  scene.add(robot);
+  robot.updateMatrixWorld(true);
+
+  for (const [name, joint] of Object.entries(robot.joints || {})) {
+    if (joint.jointType === "revolute" || joint.jointType === "continuous") {
+      jointLimits[name] = {
+        lower: joint.limit?.lower !== undefined ? Number(joint.limit.lower) : -Math.PI,
+        upper: joint.limit?.upper !== undefined ? Number(joint.limit.upper) : Math.PI,
+      };
     }
-    fitAndStyle({ provisional: true }); // 缓存命中时先摆个临时取景，终态等 onLoad
-  },
-  undefined,
-  (err) => {
-    console.error("URDF 加载失败", err);
-    setStatus("模型加载失败：" + (err?.message || err), "error");
   }
-);
+  fitAndStyle({ provisional: true }); // 缓存命中时先摆个临时取景，终态等 onLoad
+}
+
+/**
+ * 先试首选来源，取不到再试另一个。
+ * 首选按 hostname 判断（局域网读本地、公网走 CDN），但必须有个兜底：
+ * 营地断网时本地那份还在，CDN 挂了不影响；反过来本机没同步模型也能走 CDN。
+ */
+async function bootModel() {
+  const primary = pickModelBase();
+  const secondary = primary === MODEL_BASES.cdn ? MODEL_BASES.local : MODEL_BASES.cdn;
+
+  for (const base of [primary, secondary]) {
+    // 换源前清掉上一轮的失败记录，否则兜底成功后状态会误报「缺 N 个部件」
+    failedUrls.length = 0;
+    try {
+      const model = await loadURDF(base);
+      MODEL_BASE = base;
+      console.debug("[sim] 实际使用:", base);
+      initRobot(model);
+      return;
+    } catch (err) {
+      console.warn(`[sim] ${base} 取不到 URDF，换下一个：${err?.message || err}`);
+    }
+  }
+  setStatus("URDF 两个来源都取不到（CDN 与本地均失败）", "error");
+  const detail = document.getElementById("load-detail");
+  if (detail) {
+    detail.style.display = "block";
+    detail.textContent = `已尝试：\n${primary}/so101.urdf\n${secondary}/so101.urdf`;
+  }
+}
+
+bootModel();
 
 /** lerobot 口径的值 → 仿真关节角（弧度） */
 function toSimRad(joint, value) {

@@ -358,20 +358,36 @@ curl -i https://lerobot.mycodebro.cn/ChC4AVj1oJ.txt
 - 推送到从臂仍然走 `/control`，所以要先在控制台启用运动控制，且服务端
   `arm_servo_speed` 建议设为 1.0，否则从臂跟不上手。
 
-仿真资源（three.js、urdf-loader、SO-101 的 URDF 与网格）都放在
-`pi_client/moyurobot/web/static/sim/`，离线可用，不依赖 CDN。
-其中 three.js / urdf-loader / SO-101 模型来自 [bambot](https://github.com/timqian/bambot)（MIT）。
+**模型放在 COS + CDN，不占树莓派的带宽。**
 
-**加载体积**：13 个 STL 合计约 16MB，局域网首屏 20 秒左右（有进度条，网格陆续到达
-时会先摆一个临时取景，到齐后再重算，不会一直空着）。如果前面挂了 nginx，加一行
-就能省 63%——默认配置只压缩文本类型，`model/stl` 不在内：
+13 个 STL 合计 16MB，从 Pi 上传出去要十几秒。现在上传到 COS 由 CDN 分发：
 
-```nginx
-gzip_types model/stl;
+| 场景 | 来源 | 实测 |
+| --- | --- | --- |
+| 公网域名 / 手机 | `https://image.mycodebro.cn/moyurobot/sim` | 首次 1.2s，命中缓存 0.1s（23MB/s） |
+| 局域网直连 Pi | `/static/sim/models` | 走内网，不依赖外网 |
+
+选择依据是 hostname（localhost、192.168.*、10.*、172.16-31.* 视为局域网），
+也可以在控制台用 `window.SIM_MODEL_BASE = "..."` 强制指定。
+
+两个来源互为兜底：首选取不到会自动换另一个。营地断网时局域网那份还在，反过来
+Pi 上没同步模型也能走 CDN。
+
+**改了模型怎么更新**：改完 `static/sim/models/` 下的文件后
+
+```bash
+python3 tools/upload_sim_models.py --dry-run   # 先看会传什么
+python3 tools/upload_sim_models.py             # 需要 COS_SECRET_ID / COS_SECRET_KEY /
+                                               # COS_REGION / COS_BUCKET 环境变量
 ```
 
-注意 `model/stl` 这个 MIME 是 Flask 的默认类型，如果 nginx 报 unknown，改成
-`application/octet-stream` 或 `*` 亦可生效。
+脚本会带上 `Cache-Control: immutable`（文件名自带 `v1`/`v2`，内容不原地改），所以
+**换了模型记得改文件名或加版本前缀**，否则 CDN 会继续给旧文件。
+
+如果只想走本地（不配置 COS），删掉 `sim.js` 里的 `MODEL_BASES.cdn` 指向即可，
+或者直接把 `static/sim/models` 保留在 Pi 上——局域网访问时默认就是走本地。
+
+three.js / urdf-loader / SO-101 模型来自 [bambot](https://github.com/timqian/bambot)（MIT）。
 
 ## 🐛 故障排除
 
