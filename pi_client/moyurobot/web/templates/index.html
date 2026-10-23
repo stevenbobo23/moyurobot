@@ -239,7 +239,7 @@
                         机械臂控制
                     </h3>
                     <div class="flex gap-2 items-center">
-                        <a href="/sim" class="px-2 py-1 text-[10px] bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded text-gray-300 transition-colors">仿真</a>
+                        <button onclick="toggleSimWindow()" id="btn-sim-float" class="px-2 py-1 text-[10px] bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded text-gray-300 transition-colors">仿真</button>
                         <button onclick="resetArmToHome()" class="px-2 py-1 text-[10px] bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded text-gray-300 transition-colors">归位</button>
                         <button onclick="getCurrentArmPosition()" class="px-2 py-1 text-[10px] bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded text-tech-400 transition-colors">校准</button>
                     </div>
@@ -412,5 +412,17 @@
     <script src="{{ url_for('static', filename='audio_control.js') }}"></script>
     <script src="{{ url_for('static', filename='greeting_control.js') }}"></script>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
+
+    <!-- 机械臂仿真悬浮窗：3D 与主臂读取复用 static/sim/sim_view.js（/sim 也用同一份） -->
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "/static/sim/vendor/three/three.module.js",
+        "three/examples/jsm/": "/static/sim/vendor/three/examples/jsm/",
+        "three/addons/": "/static/sim/vendor/three/examples/jsm/"
+      }
+    }
+    </script>
+    <script type="module" src="/static/sim/sim_overlay.js"></script>
 </body>
 </html>
