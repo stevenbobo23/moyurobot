@@ -120,23 +120,64 @@ function setStatus(text, kind = "idle") {
 
 const loader = new URDFLoader();
 // URDFLoader 的 onComplete 在网格（STL）还没下载完时就回调了，此时包围盒是空的。
-// 用 LoadingManager 等所有网格落地，再做归一化和取景。
+// 用 LoadingManager 等网格落地再取景。
 const manager = new THREE.LoadingManager();
 loader.manager = manager;
-let fitted = false;
 const failedUrls = [];
+let totalItems = 0;
+let loadedItems = 0;
+let fittedOnce = false;
+let fitLocked = false; // 全部到齐后置位，之后不再重算
 
-manager.onStart = (url, loaded, total) => setStatus(`加载网格 0/${total}`);
-manager.onProgress = (url, loaded, total) => setStatus(`加载网格 ${loaded}/${total}`);
+function countMeshes() {
+  let n = 0;
+  if (robot) {
+    robot.traverse((c) => {
+      if (c.isMesh && c.geometry?.attributes?.position) n++;
+    });
+  }
+  return n;
+}
+
+function setProgress(loaded, total) {
+  const bar = document.getElementById("load-bar");
+  const fill = document.getElementById("load-bar-fill");
+  if (!bar || !fill) return;
+  if (total > 0) {
+    fill.style.width = `${Math.round((loaded / total) * 100)}%`;
+    bar.style.display = "block";
+  }
+}
+
+function hideProgress() {
+  const bar = document.getElementById("load-bar");
+  if (bar) bar.style.display = "none";
+}
+
+manager.onStart = (url, loaded, total) => {
+  totalItems = total;
+  setStatus(`加载网格 0/${total}`);
+  setProgress(0, total);
+};
+manager.onProgress = (url, loaded, total) => {
+  totalItems = total;
+  setStatus(`加载网格 ${loaded}/${total}`);
+  setProgress(loaded, total);
+  // 先到几个就先摆一个临时取景，别让人对着空画面等 20 秒；
+  // 全部到齐后 onLoad 会再算一次（fitAndStyle 是幂等的，会覆盖上一次）。
+  loadedItems = loaded;
+  if (!fittedOnce && countMeshes() >= 3) fitAndStyle({ provisional: true });
+};
 manager.onError = (url) => {
   failedUrls.push(url);
   console.error("[sim] 资源加载失败:", url);
   setStatus(`有 ${failedUrls.length} 个文件没取到`, "error");
 };
+manager.onLoad = () => fitAndStyle();
 
 // 看门狗：一直卡在「加载中」的时候，把真实原因写到页面上
 setTimeout(() => {
-  if (fitted) return;
+  if (fitLocked) return;
   if (!robot) {
     setStatus("URDF 没取到（/static/sim/models/so101.urdf 404？）", "error");
   } else if (failedUrls.length) {
@@ -153,30 +194,35 @@ setTimeout(() => {
   }
 }, 12000);
 
-function fitAndStyle() {
-  if (fitted || !robot) return;
-  // 至少要有一个带几何体的 Mesh，否则说明网格还没挂上来
-  let hasGeometry = false;
-  robot.traverse((c) => {
-    if (c.isMesh && c.geometry?.attributes?.position) hasGeometry = true;
-  });
-  if (!hasGeometry) return;
-  fitted = true;
+/**
+ * 归一化尺寸 + 取景。**幂等**：每次都从 scale=1、位移 0 重新量，所以可以反复调用。
+ *
+ * 为什么要能反复调：这套 STL 有 14 个、15MB，弱网下要十几秒才到齐。只在全部
+ * 到齐时才算一次的话，用户要对着空画面干等；但如果在网格没到齐时算完就锁死，
+ * 又会用残缺的包围盒算出一个荒唐的缩放（曾经算出 22 倍，整块板子糊在镜头前）。
+ * 所以：先到几个就临时取景一次，全部到齐再重算覆盖。
+ */
+function fitAndStyle({ provisional = false } = {}) {
+  if (!robot || fitLocked) return;
+  const meshes = countMeshes();
+  if (meshes < 3) return;
+  if (!provisional) fitLocked = true; // 只有「全部到齐」那次才算终态
+  fittedOnce = true;
 
-  const bodyMat = new THREE.MeshStandardMaterial({
-    color: 0xd6dee8, metalness: 0.18, roughness: 0.55,
-  });
-  const accentMat = new THREE.MeshStandardMaterial({
-    color: 0x2c3a4a, metalness: 0.3, roughness: 0.5,
-  });
+  // 材质沿用 URDF 自带的 black / green（就是 SO-101 的真实配色），只补投影。
+  // 注意别在这里整体替换 material：网格是陆续到达的，只在第一批到达时替换的话，
+  // 后到的网格会保留原色，出现一半绿一半灰的花屏。
   robot.traverse((c) => {
     if (c.isMesh) {
       c.castShadow = true;
       c.receiveShadow = true;
-      // 舵机件偏深色，结构件浅色，层次分得开
-      c.material = /sts3215|motor_holder/.test(c.name || "") ? accentMat : bodyMat;
     }
   });
+
+  // 归零再量，保证重复调用不会把缩放叠加上去
+  robot.scale.setScalar(1);
+  robot.position.set(0, 0, 0);
+  robot.updateMatrixWorld(true);
 
   // 关键顺序：先把关节摆到当前值再量包围盒。URDF 默认位（全 0）和 180° 中性位
   // 的姿态差很远，先量再摆会把取景算小一圈。
@@ -203,7 +249,10 @@ function fitAndStyle() {
   const rawSize = unionBox.getSize(new THREE.Vector3());
   const maxDim = Math.max(rawSize.x, rawSize.y, rawSize.z) || 1;
   const scale = 1.15 / maxDim;
-  console.debug("[sim] 包络尺寸", rawSize.toArray().map((v) => +v.toFixed(1)), "→ scale", scale.toFixed(6));
+  console.debug(
+    `[sim] ${provisional ? "临时" : "最终"}取景 网格=${meshes}/${totalItems || "?"}`,
+    "包络", rawSize.toArray().map((v) => +v.toFixed(1)), "→ scale", scale.toFixed(4)
+  );
   robot.scale.setScalar(scale);
   robot.updateMatrixWorld(true);
 
@@ -239,6 +288,13 @@ function fitAndStyle() {
   controls.update();
   console.debug("[sim] fitSize", fitSize.toArray().map((v) => +v.toFixed(2)),
     "aspect", camera.aspect.toFixed(2), "dist", dist.toFixed(2));
+
+  if (provisional) {
+    setStatus(`加载网格 ${loadedItems}/${totalItems}（已可预览）`);
+    return;
+  }
+
+  hideProgress();
 
   if (failedUrls.length) {
     setStatus(`模型已加载，但缺 ${failedUrls.length} 个部件`, "warn");
@@ -276,9 +332,7 @@ loader.load(
         };
       }
     }
-    fitAndStyle(); // 网格若走缓存同步挂好，这里就能直接收尾
-    // 兜底：万一 LoadingManager 没触发（比如缓存命中不计数），1.5 秒后再试
-    setTimeout(fitAndStyle, 1500);
+    fitAndStyle({ provisional: true }); // 缓存命中时先摆个临时取景，终态等 onLoad
   },
   undefined,
   (err) => {

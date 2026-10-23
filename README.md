@@ -362,6 +362,17 @@ curl -i https://lerobot.mycodebro.cn/ChC4AVj1oJ.txt
 `pi_client/moyurobot/web/static/sim/`，离线可用，不依赖 CDN。
 其中 three.js / urdf-loader / SO-101 模型来自 [bambot](https://github.com/timqian/bambot)（MIT）。
 
+**加载体积**：13 个 STL 合计约 16MB，局域网首屏 20 秒左右（有进度条，网格陆续到达
+时会先摆一个临时取景，到齐后再重算，不会一直空着）。如果前面挂了 nginx，加一行
+就能省 63%——默认配置只压缩文本类型，`model/stl` 不在内：
+
+```nginx
+gzip_types model/stl;
+```
+
+注意 `model/stl` 这个 MIME 是 Flask 的默认类型，如果 nginx 报 unknown，改成
+`application/octet-stream` 或 `*` 亦可生效。
+
 ## 🐛 故障排除
 
 ### 机器人连接失败
