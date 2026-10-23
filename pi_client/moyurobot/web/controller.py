@@ -585,9 +585,11 @@ def _build_ssl_context(cert_path: str, key_path: str) -> ssl.SSLContext:
        对端证书链，而服务端根本没有对端证书，内部一路取到 None，最后爆在
        ``sslobj.get_unverified_chain()`` —— 就是
        ``'NoneType' object has no attribute 'get_unverified_chain'``。
-       这里临时 ``extract_from_ssl()`` 拿回标准库实现建好上下文，建完立刻再
-       ``inject_into_ssl()``，让进程里其它客户端（requests/urllib3）继续吃
-       系统信任库。
+       这里从 MRO 取回标准库实现，临时替换 ``ssl.SSLContext`` 建好上下文，
+       建完立刻还原，让进程里其它客户端（requests/urllib3）继续吃系统信任库。
+       生效的那份经常是 pip 的 vendored 副本
+       （``pip._vendor.truststore._api``）而不是顶层 truststore 包，所以检测
+       必须用子串判断，不能写死等值比较。
 
     2. **不走 werkzeug 的元组路径**。传 ``(cert, key)`` 时 werkzeug 会自己
        wrap 一层 ``_SSLContext`` 子类接管 wrap_socket；直接给 SSLContext 实例
@@ -601,28 +603,37 @@ def _build_ssl_context(cert_path: str, key_path: str) -> ssl.SSLContext:
         if not os.path.isfile(path):
             raise FileNotFoundError(f"{label}文件不存在: {path}")
 
-    # truststore 是否把 ssl.SSLContext 换掉了
-    injected = None
-    if getattr(ssl.SSLContext, "__module__", "").split(".")[0] == "truststore":
-        try:
-            import truststore
-
-            truststore.extract_from_ssl()
-            injected = truststore
-            log.warning("检测到 truststore 注入了 ssl.SSLContext，已为服务端临时切回标准库实现")
-        except Exception as e:  # noqa: BLE001
-            log.warning("truststore 已注入但无法临时还原（%s），HTTPS 可能仍会失败", e)
+    # truststore 是否把 ssl.SSLContext 换掉了。
+    # 注意不能写死成 == "truststore"：实际生效的那份往往来自 pip 的 vendored
+    # 副本，模块名是 pip._vendor.truststore._api，只能用子串判断。
+    patched_cls = ssl.SSLContext
+    patched_by = getattr(patched_cls, "__module__", "") or ""
+    plain_cls = None
+    if "truststore" in patched_by:
+        # truststore 的 SSLContext 在 CPython 下继承自标准库那个类，从 MRO 取回原版。
+        # 光拿类还不够——ssl.py 里 SSLContext 的属性 setter 是按**模块全局名**
+        # SSLContext 解析的，全局名还是包装类时赋值会无限递归（minimum_version
+        # 必踩），所以必须同时把 ssl.SSLContext 这个名字临时换回原版。
+        for base in patched_cls.__mro__[1:]:
+            if getattr(base, "__module__", "") == "ssl":
+                plain_cls = base
+                break
+        if plain_cls is None:
+            log.warning("ssl.SSLContext 被 %s 替换，但 MRO 里找不到标准库原版", patched_by)
 
     try:
+        if plain_cls is not None:
+            ssl.SSLContext = plain_cls
+            log.warning(
+                "ssl.SSLContext 已被 %s 替换（truststore 注入），服务端临时切回标准库实现",
+                patched_by,
+            )
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         ctx.load_cert_chain(cert_path, key_path)
     finally:
-        if injected is not None:
-            try:
-                injected.inject_into_ssl()  # 客户端继续用系统信任库
-            except Exception as e:  # noqa: BLE001
-                log.warning("恢复 truststore 注入失败（客户端证书校验可能退回系统默认）: %s", e)
+        if plain_cls is not None:
+            ssl.SSLContext = patched_cls  # 还原，客户端继续用系统信任库
 
     # 把 SAN 和有效期打出来：局域网访问提示证书不受信任，十次有九次是
     # 访问用的 IP 不在 SAN 里（脚本按 IP 生成，换了 IP 就得重新签）
