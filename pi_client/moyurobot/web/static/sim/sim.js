@@ -101,7 +101,11 @@ function resize() {
   const w = canvasHost.clientWidth;
   const h = canvasHost.clientHeight;
   if (!w || !h) return;
-  renderer.setSize(w, h, false);
+  // 第三个参数 updateStyle 必须为 true（默认值）。传 false 时 three 不写 canvas
+  // 的 CSS 尺寸，浏览器会用属性尺寸当布局尺寸——而 setPixelRatio(2) 会把属性变成
+  // 2 倍，于是在 Retina 屏上画布变成 2160×1800，绝对定位的画布绘制在静态 aside
+  // 之上，直接把右侧面板盖掉。
+  renderer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
