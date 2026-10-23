@@ -19,18 +19,25 @@ import { LeaderSerial } from "/static/sim/leader_serial.js";
 window.__simBooted = true;
 
 // ---------------------------------------------------------------- 关节定义
-// 肩部垂直 / 肘关节放宽到 ±80（实测 URDF 允许 Pitch ±100、Elbow -100~+90，
-// 仍在物理范围内）；其余与 templates/index.html 的滑块保持一致。
-// index.html 滑块、actions.py 预设动作、gesture_control.js 已同步为 ±80；
+// 行程按 URDF 实际限位放开（so101.urdf，中点 180° 口径换算成 ±）：
+//   Rotation    69.9~289.9°  → -110 ~ +110   本页用 ±85
+//   Pitch       79.9~280.0°  → -100 ~ +100   本页用 ±100（贴满）
+//   Elbow       80.0~270.0°  → -100 ~  +90   本页用 ±100（正方向 URDF 只到 90）
+//   Wrist_Pitch 85.0~275.0°  →  -95 ~  +95   本页用 ±85
+//   Wrist_Roll  22.8~342.8°  → -157 ~ +163   本页用 ±70
+//   Jaw        180.0~280.0°  →    0 ~ +100   本页用 -10~90（负值无行程，见下）
+// 夹爪走 0-100 归一化口径，lerobot 的 _unnormalize 会先把值 clamp 到 [0,100]，
+// URDF 也只到 0，所以 -10 那段是空行程，拖过去真臂和仿真都停在 0。
+// index.html 滑块、gesture_control.js、actions.py 已同步成同一组数字；
 // MCP（mcp/server.py）的 min_safe/max_safe 仍固定 ±50，是给 AI 控制留的
 // 更保守一层，不受这里影响。
 const JOINTS = [
-  { key: "arm_shoulder_pan.pos", urdf: "Rotation",    id: 1, min: -60, max: 60, label: "肩部水平" },
-  { key: "arm_shoulder_lift.pos", urdf: "Pitch",      id: 2, min: -80, max: 80, label: "肩部垂直" },
-  { key: "arm_elbow_flex.pos",   urdf: "Elbow",       id: 3, min: -80, max: 80, label: "肘关节" },
-  { key: "arm_wrist_flex.pos",   urdf: "Wrist_Pitch", id: 4, min: -70, max: 70, label: "腕部弯曲" },
-  { key: "arm_wrist_roll.pos",   urdf: "Wrist_Roll",  id: 5, min: -70, max: 70, label: "腕部旋转" },
-  { key: "arm_gripper.pos",      urdf: "Jaw",         id: 6, min: 0,   max: 60, label: "夹爪", mode: "0-100" },
+  { key: "arm_shoulder_pan.pos", urdf: "Rotation",    id: 1, min: -85,  max: 85,  label: "肩部水平" },
+  { key: "arm_shoulder_lift.pos", urdf: "Pitch",      id: 2, min: -100, max: 100, label: "肩部垂直" },
+  { key: "arm_elbow_flex.pos",   urdf: "Elbow",       id: 3, min: -100, max: 100, label: "肘关节" },
+  { key: "arm_wrist_flex.pos",   urdf: "Wrist_Pitch", id: 4, min: -85,  max: 85,  label: "腕部弯曲" },
+  { key: "arm_wrist_roll.pos",   urdf: "Wrist_Roll",  id: 5, min: -70,  max: 70,  label: "腕部旋转" },
+  { key: "arm_gripper.pos",      urdf: "Jaw",         id: 6, min: -10,  max: 90,  label: "夹爪", mode: "0-100" },
 ];
 
 const LS_KEY = "moyurobot.sim.prefs";
@@ -596,7 +603,8 @@ async function leaderLoop() {
       const v = leader.toLerobot(joint.id, raw.get(joint.id), joint.mode);
       if (v == null) continue;
       // 主臂能读到 ±180°，超出本页设定的行程就夹住，保证仿真看到的、发给真臂的，
-      // 都还在设定范围内（肩部垂直/肘关节 ±80，其余见 JOINTS）。
+      // 都还在 JOINTS 里那一档范围内（肩部水平/腕部弯曲 ±85，肩垂直/肘 ±100，
+      // 夹爪 -10~90）。
       const c = clamp(v, joint.min, joint.max);
       if (Math.abs(c - v) > 0.5) clamped++;
       state.values[joint.key] = c;

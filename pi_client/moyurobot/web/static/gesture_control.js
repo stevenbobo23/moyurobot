@@ -8,12 +8,12 @@ const SEND_INTERVAL = 100; // 发送指令间隔 (ms)
 
 // 机械臂关节范围 (参考 index.html 中的 input 范围)
 const JOINTS = {
-    pan: { min: -60, max: 60 },
-    lift: { min: -80, max: 80 },
-    elbow: { min: -80, max: 80 },
-    wrist_flex: { min: -70, max: 70 },
+    pan: { min: -85, max: 85 },
+    lift: { min: -100, max: 100 },
+    elbow: { min: -100, max: 100 },
+    wrist_flex: { min: -85, max: 85 },
     wrist_roll: { min: -70, max: 70 },
-    gripper: { min: 0, max: 60 }
+    gripper: { min: -10, max: 90 }
 };
 
 // 平滑处理

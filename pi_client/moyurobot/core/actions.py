@@ -19,12 +19,12 @@ logger = logging.getLogger(__name__)
 
 # 关节短名 -> (完整键名, 最小限位, 最大限位, 中文描述)
 JOINT_MAPPING: Dict[str, Dict[str, Any]] = {
-    "shoulder_pan": {"key": "arm_shoulder_pan.pos", "min": -60, "max": 60, "desc": "肩部水平"},
-    "shoulder_lift": {"key": "arm_shoulder_lift.pos", "min": -80, "max": 80, "desc": "肩部垂直"},
-    "elbow_flex": {"key": "arm_elbow_flex.pos", "min": -80, "max": 80, "desc": "肘关节"},
-    "wrist_flex": {"key": "arm_wrist_flex.pos", "min": -70, "max": 70, "desc": "腕关节弯曲"},
+    "shoulder_pan": {"key": "arm_shoulder_pan.pos", "min": -85, "max": 85, "desc": "肩部水平"},
+    "shoulder_lift": {"key": "arm_shoulder_lift.pos", "min": -100, "max": 100, "desc": "肩部垂直"},
+    "elbow_flex": {"key": "arm_elbow_flex.pos", "min": -100, "max": 100, "desc": "肘关节"},
+    "wrist_flex": {"key": "arm_wrist_flex.pos", "min": -85, "max": 85, "desc": "腕关节弯曲"},
     "wrist_roll": {"key": "arm_wrist_roll.pos", "min": -70, "max": 70, "desc": "腕关节旋转"},
-    "gripper": {"key": "arm_gripper.pos", "min": 0, "max": 60, "desc": "夹爪"},
+    "gripper": {"key": "arm_gripper.pos", "min": -10, "max": 90, "desc": "夹爪"},
 }
 
 ARM_HOME_POSITIONS: Dict[str, float] = {
