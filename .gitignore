@@ -60,3 +60,7 @@ pi_client/models/*.pt
 pi_client/assets/greetings/*.wav
 pi_client/assets/greetings/manifest.json
 
+# 自签 HTTPS 证书：含私钥，且按各机 IP 签发（换机/换网段要重签），不入库。
+# 每台机器跑 ./scripts/gen_self_signed_cert.sh <本机IP> 自行生成。
+pi_client/certs/
+
