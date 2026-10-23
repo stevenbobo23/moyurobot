@@ -35,6 +35,7 @@ const MODEL_BASES = {
 
 const NEUTRAL_DEG = 180;
 const OFFSET_KEY = "moyurobot.sim.offsets";
+const DEADBAND_KEY = "moyurobot.sim.gripperDeadband";
 
 function pickModelBase() {
   if (window.SIM_MODEL_BASE) return window.SIM_MODEL_BASE;
@@ -68,6 +69,10 @@ export class SimView {
     try {
       Object.assign(this.offsets, JSON.parse(localStorage.getItem(OFFSET_KEY) || "{}"));
     } catch { /* 忽略坏数据 */ }
+
+    // 夹爪闭合死区：主臂夹到底仍读到 2~4 个单位时（颚板接触、齿轮有点虚位），
+    // 把这段残余直接归零，从臂才会真正收到 0。0 = 关闭该死区。
+    this.gripperDeadband = Number(localStorage.getItem(DEADBAND_KEY) || 2);
     this.jointLimits = {};
     this.robot = null;
     this.fittedOnce = false;
@@ -393,6 +398,13 @@ export class SimView {
     return { ...this.offsets };
   }
 
+  setGripperDeadband(v) {
+    this.gripperDeadband = Math.max(0, Number(v) || 0);
+    try {
+      localStorage.setItem(DEADBAND_KEY, String(this.gripperDeadband));
+    } catch { /* 忽略 */ }
+  }
+
   clearOffsets() {
     this.offsets = {};
     this._saveOffsets();
@@ -456,6 +468,8 @@ export class SimView {
         let v = this.leader.toLerobot(joint.id, raw.get(joint.id), joint.mode);
         if (v == null) continue;
         v += this.offsets[joint.key] || 0; // 零点微调
+        // 夹爪闭合死区：残余的几个单位直接吃掉，避免「夹到底但没发 0」
+        if (joint.mode === "0-100" && v < this.gripperDeadband) v = 0;
         // 主臂能读到 ±180°，但滑块行程只有 ±100 这一档，超出就夹住
         const c = clamp(v, joint.min, joint.max);
         if (Math.abs(c - v) > 0.5) clamped++;

@@ -269,6 +269,7 @@ $("btn-zero-here").addEventListener("click", () => {
     n++;
   }
   buildOffsets();
+  paintDeadband();
   // 下一帧读数就会接近 0，给个提示说清代价
   const lose = diag
     .filter((d) => d.value != null && Math.abs(d.value) > 1)
@@ -278,6 +279,22 @@ $("btn-zero-here").addEventListener("click", () => {
     lose ? `已对齐 ${n} 个关节；可用行程一侧会少 ${lose}` : `已对齐 ${n} 个关节`,
     "ok"
   );
+});
+
+// 夹爪闭合死区：主臂夹到底仍读 2~4 时，这段残余会让从臂留缝
+function paintDeadband() {
+  const el = $("db-val");
+  if (!el) return;
+  el.textContent = view.gripperDeadband.toFixed(1);
+  el.style.color = view.gripperDeadband > 0 ? "#fbbf24" : "#38bdf8";
+}
+$("db-dec").addEventListener("click", () => {
+  view.setGripperDeadband(Math.max(0, view.gripperDeadband - 0.5));
+  paintDeadband();
+});
+$("db-inc").addEventListener("click", () => {
+  view.setGripperDeadband(view.gripperDeadband + 0.5);
+  paintDeadband();
 });
 
 $("btn-clear-offsets").addEventListener("click", () => {
@@ -348,6 +365,7 @@ $("btn-read-follower").addEventListener("click", async () => {
 loadPrefs();
 buildSliders();
 buildOffsets();
+paintDeadband();
 view.setInvert(state.invert);
 $("push-toggle").checked = state.pushEnabled;
 setPushState(state.pushEnabled ? "待推送" : "已暂停", "idle");

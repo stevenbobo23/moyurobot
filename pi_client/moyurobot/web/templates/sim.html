@@ -178,6 +178,12 @@
                 以当前姿态为零点
             </button>
             <div id="offsets"></div>
+            <div class="offset-row" style="margin-top:10px;border-top:1px solid #1f2937;padding-top:10px">
+                <span class="offset-name" title="主臂夹到底仍读到几个单位时，这段残余被直接归零">夹爪闭合死区</span>
+                <button id="db-dec" title="−0.5">−</button>
+                <span class="offset-val" id="db-val">2.0</span>
+                <button id="db-inc" title="+0.5">+</button>
+            </div>
             <div class="text-[10px] text-gray-600 mt-1 leading-relaxed">
                 主臂松手、摆到你认为的 0 位，先点上面那个按钮一键对齐；还差一点再用 ±1 / ±10 微调。
                 只影响主臂读数，不影响手动滑块。
