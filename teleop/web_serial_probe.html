@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>主臂 Web Serial 探针</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36;
+    --txt: #e6e9ef; --dim: #8b93a3; --ok: #3ecf8e; --warn: #f2b26b; --err: #ef6060;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--txt);
+    font: 14px/1.5 -apple-system, "SF Pro Text", "PingFang SC", sans-serif;
+    padding: 24px; max-width: 880px; margin: 0 auto;
+  }
+  h1 { font-size: 17px; margin: 0 0 4px; font-weight: 600; }
+  .sub { color: var(--dim); font-size: 12.5px; margin-bottom: 20px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px; margin-bottom: 14px;
+  }
+  .row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+  label { display: block; font-size: 11px; color: var(--dim); margin-bottom: 4px; letter-spacing: .02em; }
+  input[type=number], input[type=text] {
+    background: #0b0d11; border: 1px solid var(--line); color: var(--txt);
+    border-radius: 6px; padding: 7px 9px; font: 13px ui-monospace, Menlo, monospace; width: 100%;
+  }
+  button {
+    background: #222834; border: 1px solid #2f3646; color: var(--txt);
+    border-radius: 6px; padding: 8px 14px; font-size: 13px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: #2a3140; }
+  button:disabled { opacity: .4; cursor: default; }
+  button.primary { background: #1f6feb; border-color: #2b7fff; }
+  button.primary:hover:not(:disabled) { background: #2b7fff; }
+  button.danger { border-color: #5a2a2a; color: #ffb3b3; }
+  table { width: 100%; border-collapse: collapse; font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; }
+  th { text-align: left; color: var(--dim); font-weight: 500; font-size: 11px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  td { padding: 6px 8px; border-bottom: 1px solid #1e232d; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .bar { height: 4px; background: #22262f; border-radius: 2px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--ok); }
+  #log {
+    background: #080a0d; border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px; height: 140px; overflow-y: auto;
+    font: 12px ui-monospace, Menlo, monospace; color: #a9b2c1; white-space: pre-wrap;
+  }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; }
+  .pill.off { background: #262b36; color: var(--dim); }
+  .pill.on { background: #16351f; color: var(--ok); }
+  .pill.bad { background: #3a1a1a; color: var(--err); }
+  .note { font-size: 12px; color: var(--dim); margin-top: 10px; }
+  .kv { display: flex; gap: 18px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--dim); }
+  .kv b { color: var(--txt); font-weight: 500; }
+</style>
+</head>
+<body>
+
+<h1>主臂 Web Serial 探针</h1>
+<div class="sub">
+  只做一件事故意做窄：验证浏览器能不能直连 STS3215 总线、读不读得到 6 个关节角。<br>
+  通了才值得往正式页面里接；不通就退回「本地桥」方案，别在这上面耗时间。
+</div>
+
+<div class="card">
+  <div class="row">
+    <div style="flex:0 0 150px">
+      <label>波特率</label>
+      <input type="number" id="baud" value="1000000" step="1">
+    </div>
+    <div style="flex:0 0 170px">
+      <label>舵机 ID（逗号分隔）</label>
+      <input type="text" id="ids" value="1,2,3,4,5,6">
+    </div>
+    <button class="primary" id="btnConnect">连接串口</button>
+    <button id="btnTorqueOff" disabled>松开扭矩</button>
+    <button id="btnTorqueOn" disabled>锁定扭矩</button>
+    <span id="status" class="pill off">未连接</span>
+  </div>
+  <div class="note">
+    必须在 Chrome / Edge 打开，并且是 <b>https://</b> 或 <b>http://localhost</b>。
+    Safari、Firefox、手机浏览器都不支持 Web Serial。
+  </div>
+</div>
+
+<div class="card">
+  <div class="kv" style="margin-bottom:12px">
+    <span>帧率 <b id="hz">–</b></span>
+    <span>往返 <b id="rtt">–</b></span>
+    <span>错误 <b id="errs">0</b></span>
+  </div>
+  <table>
+    <thead>
+      <tr><th style="width:70px">ID</th><th style="width:90px">原始值</th><th style="width:80px">范围</th><th style="width:90px">角度</th><th>位置</th></tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+
+<div class="card">
+  <div class="row">
+    <div style="flex:1 1 320px">
+      <label>推送到小车（留空则只在本地显示）</label>
+      <input type="text" id="pushUrl" placeholder="http://192.168.1.23:8080/control">
+    </div>
+    <div style="flex:0 0 110px">
+      <label>推送频率</label>
+      <input type="number" id="pushHz" value="30" step="1">
+    </div>
+    <button id="btnPush" disabled>开始推送</button>
+  </div>
+  <div class="note">推送前记得先在网页上启用运动控制，否则 /control 会回「仅监控模式」。</div>
+</div>
+
+<div id="log"></div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Feetech STS3215（协议 0）最小实现
+//   地址来自 lerobot/motors/feetech/tables.py 的 STS_SMS_SERIES_CONTROL_TABLE
+//   Present_Position   0x38 (2B)
+//   Min_Position_Limit 0x09 (2B)
+//   Max_Position_Limit 0x0B (2B)
+//   Torque_Enable      0x28 (1B)
+//   分辨率 4096 → max_res = 4095
+// 帧格式: FF FF ID LEN INSTR PARAM... CKSUM,  CKSUM = ~(ID+LEN+INSTR+PARAM) & 0xFF
+// ---------------------------------------------------------------------------
+const REG = { MIN: 0x09, MAX: 0x0B, PRESENT: 0x38, TORQUE: 0x28 };
+const MAX_RES = 4095;
+
+const JOINTS = [
+  "arm_shoulder_pan.pos", "arm_shoulder_lift.pos", "arm_elbow_flex.pos",
+  "arm_wrist_flex.pos", "arm_wrist_roll.pos", "arm_gripper.pos",
+];
+
+const $ = (id) => document.getElementById(id);
+const logEl = $("log");
+function log(msg, cls) {
+  const t = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+  const color = cls === "err" ? "#ef6060" : cls === "ok" ? "#3ecf8e" : "#a9b2c1";
+  logEl.innerHTML += `<div style="color:${color}">${t}  ${msg}</div>`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+const cksum = (bytes) => {
+  let s = 0;
+  for (const b of bytes) s += b;
+  return ~s & 0xff;
+};
+
+// 单舵机读：INSTR 0x02, PARAM [addr, len]
+function pktRead(id, addr, len) {
+  const body = [id, 2 + 2, 0x02, addr, len];
+  return new Uint8Array([0xff, 0xff, ...body, cksum(body)]);
+}
+
+// 同步读：INSTR 0x82, PARAM [addr, len, id...], 广播 ID 0xFE。一次往返拿全部
+function pktSyncRead(ids, addr, len) {
+  const params = [addr, len, ...ids];
+  const body = [0xfe, params.length + 2, 0x82, ...params];
+  return new Uint8Array([0xff, 0xff, ...body, cksum(body)]);
+}
+
+// 写：INSTR 0x03, PARAM [addr, ...data]
+function pktWrite(id, addr, data) {
+  const params = [addr, ...data];
+  const body = [id, params.length + 2, 0x03, ...params];
+  return new Uint8Array([0xff, 0xff, ...body, cksum(body)]);
+}
+
+class FeetechBus {
+  constructor() {
+    this.port = null;
+    this.reader = null;
+    this.writer = null;
+    this.buf = [];
+    this.waiters = [];
+    this.pumping = false;
+  }
+
+  async open(baudRate) {
+    this.port = await navigator.serial.requestPort();
+    await this.port.open({ baudRate, dataBits: 8, stopBits: 1, parity: "none" });
+    this.writer = this.port.writable.getWriter();
+    this.reader = this.port.readable.getReader();
+    this.pumping = true;
+    this._pump();
+  }
+
+  async _pump() {
+    try {
+      while (this.pumping) {
+        const { value, done } = await this.reader.read();
+        if (done) break;
+        if (value && value.length) {
+          for (const b of value) this.buf.push(b);
+          this._notify();
+        }
+      }
+    } catch (e) {
+      if (this.pumping) log("读取中断: " + e.message, "err");
+    }
+  }
+
+  _notify() {
+    for (const w of this.waiters.slice()) w();
+  }
+
+  // 从缓冲区里切出完整状态包：FF FF ID LEN ERR DATA... CKSUM
+  _parse() {
+    const out = [];
+    while (true) {
+      let i = -1;
+      for (let k = 0; k + 1 < this.buf.length; k++) {
+        if (this.buf[k] === 0xff && this.buf[k + 1] === 0xff) { i = k; break; }
+      }
+      if (i < 0) { this.buf = []; break; }
+      if (i > 0) this.buf.splice(0, i);
+      if (this.buf.length < 4) break;
+      const len = this.buf[3];
+      // LEN = ERR(1) + DATA(m) + CKSUM(1)，整帧 = FF FF ID LEN + LEN 字节
+      const total = 4 + len;
+      if (this.buf.length < total) break;
+      const frame = this.buf.splice(0, total);
+      const body = frame.slice(2, total - 1);
+      const ck = frame[total - 1];
+      if (cksum(body) !== ck) { continue; }
+      out.push({ id: frame[2], err: frame[4], data: frame.slice(5, total - 1) });
+    }
+    return out;
+  }
+
+  async _waitPackets(n, timeoutMs) {
+    const deadline = performance.now() + timeoutMs;
+    while (true) {
+      const got = this._parse();
+      if (got.length >= n) return got;
+      const left = deadline - performance.now();
+      if (left <= 0) return got;
+      await Promise.race([
+        new Promise((r) => this.waiters.push(r)),
+        new Promise((r) => setTimeout(r, left)),
+      ]);
+    }
+  }
+
+  async _xfer(bytes, n, timeoutMs = 30) {
+    this.buf = [];
+    await this.writer.write(bytes);
+    return this._waitPackets(n, timeoutMs);
+  }
+
+  async syncReadPositions(ids) {
+    const t0 = performance.now();
+    const frames = await this._xfer(pktSyncRead(ids, REG.PRESENT, 2), ids.length, 30);
+    const rtt = performance.now() - t0;
+    const map = {};
+    for (const f of frames) {
+      map[f.id] = (f.data[1] << 8) | f.data[0]; // 小端
+    }
+    return { map, rtt, expected: ids.length };
+  }
+
+  async readLimits(ids) {
+    const res = {};
+    for (const id of ids) {
+      const [a] = await this._xfer(pktRead(id, REG.MIN, 4), 1, 30); // 连续读 min+max
+      if (!a) { res[id] = null; continue; }
+      res[id] = {
+        min: (a.data[1] << 8) | a.data[0],
+        max: (a.data[3] << 8) | a.data[2],
+      };
+    }
+    return res;
+  }
+
+  async writeReg(id, addr, data) {
+    await this._xfer(pktWrite(id, addr, data), 1, 30);
+  }
+
+  async close() {
+    this.pumping = false;
+    try { await this.reader?.cancel(); } catch {}
+    try { this.reader?.releaseLock(); } catch {}
+    try { this.writer?.releaseLock(); } catch {}
+    try { await this.port?.close(); } catch {}
+  }
+}
+
+// ---------------------------------------------------------------------------
+const bus = new FeetechBus();
+let ids = [], limits = {}, running = false, pushing = false;
+let frames = 0, hzT0 = performance.now(), errCount = 0, lastRtt = 0;
+let latest = {};
+
+function angleOf(id, raw) {
+  const l = limits[id];
+  if (!l) return null;
+  const mid = (l.min + l.max) / 2;
+  return (raw - mid) * 360 / MAX_RES;
+}
+
+function render() {
+  $("tbody").innerHTML = ids.map((id, i) => {
+    const raw = latest[id];
+    const a = raw == null ? null : angleOf(id, raw);
+    const l = limits[id];
+    const pct = (l && raw != null && l.max !== l.min)
+      ? Math.max(0, Math.min(100, (raw - l.min) / (l.max - l.min) * 100)) : 0;
+    return `<tr>
+      <td>${id}</td>
+      <td class="num">${raw ?? "—"}</td>
+      <td class="num" style="color:#8b93a3">${l ? l.min + "–" + l.max : "—"}</td>
+      <td class="num">${a == null ? "—" : a.toFixed(1) + "°"}</td>
+      <td><div class="bar"><i style="width:${pct}%;opacity:${l ? 1 : .2}"></i></div>
+          <div style="font-size:10px;color:#5f6775;margin-top:2px">${JOINTS[i]}</div></td>
+    </tr>`;
+  }).join("");
+  const el = (performance.now() - hzT0) / 1000;
+  $("hz").textContent = el > 0 ? (frames / el).toFixed(1) : "–";
+  $("rtt").textContent = lastRtt.toFixed(1);
+  $("errs").textContent = errCount;
+}
+
+async function readOnce() {
+  try {
+    const { map, rtt, expected } = await bus.syncReadPositions(ids);
+    if (Object.keys(map).length < expected) errCount++;
+    latest = map;
+    lastRtt = rtt;
+    frames++;
+  } catch (e) {
+    errCount++;
+    log("读取出错: " + e.message, "err");
+  }
+}
+
+// 自调度而不是 setInterval：一次读多久就跑多快，不会把排队的定时器堆起来
+async function runLoop() {
+  if (!running) return;
+  await readOnce();
+  render();
+  setTimeout(runLoop, 0);
+}
+
+$("btnConnect").onclick = async () => {
+  if (!("serial" in navigator)) {
+    log("这个浏览器不支持 Web Serial，换 Chrome / Edge", "err");
+    return;
+  }
+  ids = $("ids").value.split(",").map((s) => parseInt(s.trim(), 10)).filter(Boolean);
+  try {
+    log("请求串口权限...");
+    await bus.open(parseInt($("baud").value, 10));
+    log("串口已打开，读关节限位...", "ok");
+    limits = await bus.readLimits(ids);
+    const missing = ids.filter((id) => !limits[id]);
+    if (missing.length) log("没读到限位的 ID: " + missing.join(", "), "err");
+    else log("限位读取完成", "ok");
+
+    $("status").textContent = "已连接";
+    $("status").className = "pill on";
+    $("btnConnect").disabled = true;
+    $("btnTorqueOff").disabled = false;
+    $("btnTorqueOn").disabled = false;
+    $("btnPush").disabled = false;
+
+    hzT0 = performance.now(); frames = 0; errCount = 0;
+    running = true;
+    runLoop();
+  } catch (e) {
+    log("打开失败: " + e.message, "err");
+  }
+};
+
+$("btnTorqueOff").onclick = async () => {
+  try {
+    for (const id of ids) await bus.writeReg(id, REG.TORQUE, [0]);
+    log("已松开扭矩，可以手动搬主臂了", "ok");
+  } catch (e) { log("写扭矩失败: " + e.message, "err"); }
+};
+
+$("btnTorqueOn").onclick = async () => {
+  try {
+    for (const id of ids) await bus.writeReg(id, REG.TORQUE, [1]);
+    log("已锁定扭矩", "ok");
+  } catch (e) { log("写扭矩失败: " + e.message, "err"); }
+};
+
+$("btnPush").onclick = async () => {
+  const url = $("pushUrl").value.trim();
+  if (!url) { log("先填推送地址", "err"); return; }
+
+  if (pushing) {
+    pushing = false;
+    $("btnPush").textContent = "开始推送";
+    log("停止推送");
+    return;
+  }
+
+  const hz = Math.max(1, Math.min(60, parseInt($("pushHz").value, 10) || 30));
+  const period = 1000 / hz;
+  let fail = 0;
+
+  const bodyNow = () => {
+    const body = {};
+    ids.forEach((id, i) => {
+      const raw = latest[id];
+      if (raw == null) return;
+      const a = angleOf(id, raw);
+      if (a != null) body[JOINTS[i]] = +a.toFixed(2);
+    });
+    return body;
+  };
+
+  const pushLoop = async () => {
+    if (!pushing) return;
+    const t0 = performance.now();
+    const body = bodyNow();
+    if (Object.keys(body).length) {
+      try {
+        const r = await fetch(url, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body), signal: AbortSignal.timeout(300),
+        });
+        const j = await r.json();
+        if (!j.success) { fail++; if (fail % 20 === 1) log("服务端: " + j.message, "err"); }
+      } catch { fail++; }
+    }
+    setTimeout(pushLoop, Math.max(0, period - (performance.now() - t0)));
+  };
+
+  pushing = true;
+  $("btnPush").textContent = "停止推送";
+  log(`开始推送到 ${url} @ ${hz}Hz`);
+  pushLoop();
+};
+
+render();
+</script>
+</body>
+</html>
