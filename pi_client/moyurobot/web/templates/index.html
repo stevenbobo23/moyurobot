@@ -186,77 +186,6 @@
             <!-- 以下面板整体可滚动：底盘/手势常驻，其余内容滚动查看 -->
             <div class="flex-none lg:flex-1 lg:min-h-0 lg:overflow-y-auto sidebar-scroll">
 
-            <!-- 语音对讲面板 -->
-            <div id="audio-panel" class="flex-none px-5 py-4 border-b border-gray-800/50">
-                <div class="flex justify-between items-center mb-3">
-                    <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest flex items-center gap-2">
-                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M11 5L6 9H2v6h4l5 4V5z"></path></svg>
-                        语音对讲
-                    </h3>
-                    <span id="audio-badge" class="text-[10px] font-mono px-2 py-0.5 rounded border border-gray-700 text-gray-500">检测中…</span>
-                </div>
-
-                <div class="grid grid-cols-2 gap-2 mb-3">
-                    <button id="audio-listen-btn" type="button"
-                            class="h-12 rounded-lg border-2 border-gray-700 bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-                            disabled>
-                        <span class="text-lg">🔊</span><span id="audio-listen-label">监听车端</span>
-                    </button>
-                    <button id="audio-ptt-btn" type="button"
-                            class="h-12 rounded-lg border-2 border-gray-700 bg-gray-800 text-gray-500 font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-95 select-none disabled:opacity-40 disabled:cursor-not-allowed"
-                            disabled>
-                        <span class="text-lg">🎙</span><span id="audio-ptt-label">按住说话</span>
-                    </button>
-                </div>
-
-                <div class="space-y-1.5 mb-3">
-                    <div class="flex items-center gap-2">
-                        <span class="w-8 text-[10px] font-mono text-gray-500">车端</span>
-                        <div class="flex-1 h-1.5 bg-gray-800 rounded overflow-hidden">
-                            <div id="audio-meter-remote" class="h-full bg-tech-500" style="width:0%"></div>
-                        </div>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <span class="w-8 text-[10px] font-mono text-gray-500">本地</span>
-                        <div class="flex-1 h-1.5 bg-gray-800 rounded overflow-hidden">
-                            <div id="audio-meter-local" class="h-full bg-green-500" style="width:0%"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="flex items-center gap-2">
-                    <span class="text-[10px] font-mono text-gray-500">音量</span>
-                    <input id="audio-volume" type="range" min="0" max="150" value="100" step="5"
-                           class="flex-1 h-1 bg-gray-800 rounded appearance-none cursor-pointer" style="accent-color:#0ea5e9" />
-                    <span id="audio-volume-value" class="w-9 text-right text-[10px] font-mono text-tech-400">100</span>
-                </div>
-
-                <details id="audio-advanced" class="mt-3 border-t border-gray-800/60 pt-2">
-                    <summary class="text-[10px] text-gray-500 cursor-pointer hover:text-gray-300 select-none">设备与自检</summary>
-                    <div class="mt-2 space-y-2">
-                        <label class="block">
-                            <span class="text-[10px] text-gray-500 font-mono">车端麦克风</span>
-                            <select id="audio-capture-device" class="w-full mt-1 bg-gray-950 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-300"></select>
-                        </label>
-                        <label class="block">
-                            <span class="text-[10px] text-gray-500 font-mono">车端扬声器</span>
-                            <select id="audio-playback-device" class="w-full mt-1 bg-gray-950 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-300"></select>
-                        </label>
-                        <input id="audio-custom-device" type="text" placeholder="自定义设备（可选），如 plughw:1,0；留空则用上面的选择"
-                               class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-300 placeholder-gray-600" />
-                        <div class="grid grid-cols-2 gap-2">
-                            <button type="button" onclick="applyAudioDevices()"
-                                    class="py-1.5 text-[11px] bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded text-gray-300 transition-colors">应用设备</button>
-                            <button type="button" onclick="runAudioSelfCheck()"
-                                    class="py-1.5 text-[11px] bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded text-tech-400 transition-colors">运行自检</button>
-                        </div>
-                        <div id="audio-diagnostics" class="text-[10px] font-mono text-gray-500 whitespace-pre-wrap leading-relaxed"></div>
-                    </div>
-                </details>
-
-                <div id="audio-hint" class="mt-2 text-[10px] text-gray-500 leading-relaxed"></div>
-            </div>
-
             <!-- 自动打招呼面板 -->
             <div id="greeting-panel" class="flex-none px-5 py-4 border-b border-gray-800/50">
                 <div class="flex justify-between items-center mb-3">
@@ -371,6 +300,77 @@
                     </div>
                 </div>
             </div>
+            <!-- 语音对讲面板 -->
+            <div id="audio-panel" class="flex-none px-5 py-4 border-b border-gray-800/50">
+                <div class="flex justify-between items-center mb-3">
+                    <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest flex items-center gap-2">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M11 5L6 9H2v6h4l5 4V5z"></path></svg>
+                        语音对讲
+                    </h3>
+                    <span id="audio-badge" class="text-[10px] font-mono px-2 py-0.5 rounded border border-gray-700 text-gray-500">检测中…</span>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2 mb-3">
+                    <button id="audio-listen-btn" type="button"
+                            class="h-12 rounded-lg border-2 border-gray-700 bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                            disabled>
+                        <span class="text-lg">🔊</span><span id="audio-listen-label">监听车端</span>
+                    </button>
+                    <button id="audio-ptt-btn" type="button"
+                            class="h-12 rounded-lg border-2 border-gray-700 bg-gray-800 text-gray-500 font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-95 select-none disabled:opacity-40 disabled:cursor-not-allowed"
+                            disabled>
+                        <span class="text-lg">🎙</span><span id="audio-ptt-label">按住说话</span>
+                    </button>
+                </div>
+
+                <div class="space-y-1.5 mb-3">
+                    <div class="flex items-center gap-2">
+                        <span class="w-8 text-[10px] font-mono text-gray-500">车端</span>
+                        <div class="flex-1 h-1.5 bg-gray-800 rounded overflow-hidden">
+                            <div id="audio-meter-remote" class="h-full bg-tech-500" style="width:0%"></div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="w-8 text-[10px] font-mono text-gray-500">本地</span>
+                        <div class="flex-1 h-1.5 bg-gray-800 rounded overflow-hidden">
+                            <div id="audio-meter-local" class="h-full bg-green-500" style="width:0%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <span class="text-[10px] font-mono text-gray-500">音量</span>
+                    <input id="audio-volume" type="range" min="0" max="150" value="100" step="5"
+                           class="flex-1 h-1 bg-gray-800 rounded appearance-none cursor-pointer" style="accent-color:#0ea5e9" />
+                    <span id="audio-volume-value" class="w-9 text-right text-[10px] font-mono text-tech-400">100</span>
+                </div>
+
+                <details id="audio-advanced" class="mt-3 border-t border-gray-800/60 pt-2">
+                    <summary class="text-[10px] text-gray-500 cursor-pointer hover:text-gray-300 select-none">设备与自检</summary>
+                    <div class="mt-2 space-y-2">
+                        <label class="block">
+                            <span class="text-[10px] text-gray-500 font-mono">车端麦克风</span>
+                            <select id="audio-capture-device" class="w-full mt-1 bg-gray-950 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-300"></select>
+                        </label>
+                        <label class="block">
+                            <span class="text-[10px] text-gray-500 font-mono">车端扬声器</span>
+                            <select id="audio-playback-device" class="w-full mt-1 bg-gray-950 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-300"></select>
+                        </label>
+                        <input id="audio-custom-device" type="text" placeholder="自定义设备（可选），如 plughw:1,0；留空则用上面的选择"
+                               class="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-300 placeholder-gray-600" />
+                        <div class="grid grid-cols-2 gap-2">
+                            <button type="button" onclick="applyAudioDevices()"
+                                    class="py-1.5 text-[11px] bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded text-gray-300 transition-colors">应用设备</button>
+                            <button type="button" onclick="runAudioSelfCheck()"
+                                    class="py-1.5 text-[11px] bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded text-tech-400 transition-colors">运行自检</button>
+                        </div>
+                        <div id="audio-diagnostics" class="text-[10px] font-mono text-gray-500 whitespace-pre-wrap leading-relaxed"></div>
+                    </div>
+                </details>
+
+                <div id="audio-hint" class="mt-2 text-[10px] text-gray-500 leading-relaxed"></div>
+            </div>
+
             </div>
         </aside>
     </main>
