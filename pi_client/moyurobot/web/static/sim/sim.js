@@ -19,12 +19,14 @@ import { LeaderSerial } from "/static/sim/leader_serial.js";
 window.__simBooted = true;
 
 // ---------------------------------------------------------------- 关节定义
-// slider 的 min/max 与 templates/index.html 中现有滑块保持一致，这样仿真和
-// 真实从臂的动作范围完全对齐。
+// 肩部垂直 / 肘关节放宽到 ±80（实测 URDF 允许 Pitch ±100、Elbow -100~+90，
+// 仍在物理范围内）；其余与 templates/index.html 的滑块保持一致。
+// 注意：index.html 和 actions.py 里这两个关节仍是旧的 ±55/±50，只影响那两处
+// 的 UI 与预设动作，不影响本页 clamp 与下发。
 const JOINTS = [
   { key: "arm_shoulder_pan.pos", urdf: "Rotation",    id: 1, min: -60, max: 60, label: "肩部水平" },
-  { key: "arm_shoulder_lift.pos", urdf: "Pitch",      id: 2, min: -55, max: 55, label: "肩部垂直" },
-  { key: "arm_elbow_flex.pos",   urdf: "Elbow",       id: 3, min: -50, max: 50, label: "肘关节" },
+  { key: "arm_shoulder_lift.pos", urdf: "Pitch",      id: 2, min: -80, max: 80, label: "肩部垂直" },
+  { key: "arm_elbow_flex.pos",   urdf: "Elbow",       id: 3, min: -80, max: 80, label: "肘关节" },
   { key: "arm_wrist_flex.pos",   urdf: "Wrist_Pitch", id: 4, min: -70, max: 70, label: "腕部弯曲" },
   { key: "arm_wrist_roll.pos",   urdf: "Wrist_Roll",  id: 5, min: -70, max: 70, label: "腕部旋转" },
   { key: "arm_gripper.pos",      urdf: "Jaw",         id: 6, min: 0,   max: 60, label: "夹爪", mode: "0-100" },
@@ -592,8 +594,8 @@ async function leaderLoop() {
     for (const joint of JOINTS) {
       const v = leader.toLerobot(joint.id, raw.get(joint.id), joint.mode);
       if (v == null) continue;
-      // 主臂能读到 ±180°，但控制台给的安全行程只有 ±60 这一档。超出就夹住，
-      // 保证仿真看到的、发给真臂的，都还在原有安全范围内。
+      // 主臂能读到 ±180°，超出本页设定的行程就夹住，保证仿真看到的、发给真臂的，
+      // 都还在设定范围内（肩部垂直/肘关节 ±80，其余见 JOINTS）。
       const c = clamp(v, joint.min, joint.max);
       if (Math.abs(c - v) > 0.5) clamped++;
       state.values[joint.key] = c;
