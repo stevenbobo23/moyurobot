@@ -77,7 +77,14 @@ const view = new SimView($("viewer"), {
     refreshSliderUI();
     schedulePush();
   },
+  onLeaderWarn: (msg) => {
+    const n = $("diag-warn");
+    if (!n) return;
+    n.textContent = msg;
+    n.classList.remove("hidden");
+  },
   onLeaderStats: ({ hz, rtt, errors, clamped }) => {
+    paintDiag();
     $("leader-hz").textContent = hz.toFixed(1);
     $("leader-rtt").textContent = rtt.toFixed(1);
     $("leader-err").textContent = String(errors);
@@ -194,6 +201,28 @@ function refreshSliderUI() {
   }
 }
 
+// ---------------------------------------------------------------- 诊断
+function paintDiag() {
+  const host = $("diag");
+  if (!host) return;
+  const rows = view.getDiagnostics();
+  const state = $("diag-state");
+  if (state) {
+    const bad = rows.filter((d) => d.uncalibrated).length;
+    state.textContent = view.leaderConnected
+      ? (bad ? `${bad} 个未校准` : "已校准")
+      : "未连接";
+    state.style.color = bad ? "#fbbf24" : "#6b7280";
+  }
+  host.innerHTML = rows.map((d) => `
+    <div class="diag-row">
+      <span>${d.label}</span>
+      <span>${d.raw ?? "–"}</span>
+      <span class="${d.uncalibrated ? "warn" : ""}">${d.min}~${d.max}</span>
+      <span>${d.value == null ? "–" : d.value.toFixed(1)}</span>
+    </div>`).join("");
+}
+
 // ---------------------------------------------------------------- 零点微调
 function buildOffsets() {
   const host = $("offsets");
@@ -226,6 +255,31 @@ function buildOffsets() {
   }
 }
 
+// 一键：把当前读数反号存成偏移，于是此刻就是 0
+$("btn-zero-here").addEventListener("click", () => {
+  if (!view.leaderConnected) {
+    setLeaderState("先连接主臂再对齐", "warn");
+    return;
+  }
+  const diag = view.getDiagnostics();
+  let n = 0;
+  for (const d of diag) {
+    if (d.value == null) continue;
+    view.setOffset(d.key, Math.round(-d.value * 10) / 10);
+    n++;
+  }
+  buildOffsets();
+  // 下一帧读数就会接近 0，给个提示说清代价
+  const lose = diag
+    .filter((d) => d.value != null && Math.abs(d.value) > 1)
+    .map((d) => `${d.label} ${d.value > 0 ? "−" : "+"}${Math.abs(d.value).toFixed(0)}`)
+    .join("、");
+  setLeaderState(
+    lose ? `已对齐 ${n} 个关节；可用行程一侧会少 ${lose}` : `已对齐 ${n} 个关节`,
+    "ok"
+  );
+});
+
 $("btn-clear-offsets").addEventListener("click", () => {
   view.clearOffsets();
   buildOffsets();
@@ -241,6 +295,7 @@ $("btn-leader").addEventListener("click", async () => {
     } else {
       btn.textContent = "连接中…";
       await view.connectLeader();
+      paintDiag();
       const miss = JOINTS.filter((j) => view.leader.limits.get(j.id)?.fallback).map((j) => j.id);
       setLeaderState(
         miss.length ? `已连接（ID ${miss.join(",")} 未读到量程）` : "已连接",

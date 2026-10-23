@@ -267,6 +267,13 @@ export async function openSimWindow() {
         writePageValues(values);
         pushToArm(values);
       },
+      // 主臂没校准（量程还是出厂 0~4095）时，零点偏差是必然的，别让人瞎调偏移
+      onLeaderWarn: (msg) => {
+        console.warn("[sim]", msg);
+        setStatus("主臂未校准，零点会偏（诊断见 /sim）", "warn");
+        const n = document.getElementById("sim-float-status");
+        if (n) n.title = msg;
+      },
       onLeaderStats: ({ hz, rtt, errors, clamped }) => {
         if (view?.leaderConnected) {
           const extra = clamped ? ` · ${clamped} 轴超行程已夹住` : "";

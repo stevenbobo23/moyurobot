@@ -73,6 +73,15 @@
         }
         .offset-row button:hover { border-color: #0ea5e9; color: #38bdf8; }
 
+        .diag-head, .diag-row {
+            display: grid; grid-template-columns: 1fr 46px 96px 46px;
+            gap: 4px; font-family: ui-monospace, Menlo, monospace; font-size: 10px;
+        }
+        .diag-head { color: #4b5563; border-bottom: 1px solid #1f2937; padding-bottom: 3px; margin-bottom: 4px; }
+        .diag-row { padding: 2px 0; color: #9ca3af; }
+        .diag-row span:nth-child(2), .diag-row span:nth-child(4) { text-align: right; }
+        .diag-row .warn { color: #fbbf24; }
+
         input[type=range] { width: 100%; height: 3px; -webkit-appearance: none; appearance: none;
             background: #1f2937; border-radius: 2px; outline: none; }
         input[type=range]::-webkit-slider-thumb {
@@ -163,11 +172,27 @@
                 <button id="btn-clear-offsets"
                     class="normal-case tracking-normal text-[10px] text-gray-500 hover:text-tech-400">全部归零</button>
             </div>
+            <button id="btn-zero-here"
+                class="w-full mb-3 py-1.5 rounded text-xs border border-gray-700 hover:bg-gray-800
+                       text-gray-300 hover:text-white transition-colors">
+                以当前姿态为零点
+            </button>
             <div id="offsets"></div>
             <div class="text-[10px] text-gray-600 mt-1 leading-relaxed">
-                主臂松手、摆到你认为的 0 位，哪个关节对不上就调哪个。点一下 ±1，按住 Shift 点 ±10。
+                主臂松手、摆到你认为的 0 位，先点上面那个按钮一键对齐；还差一点再用 ±1 / ±10 微调。
                 只影响主臂读数，不影响手动滑块。
             </div>
+        </div>
+
+        <!-- 主臂诊断 -->
+        <div class="panel-section">
+            <div class="panel-title">
+                <span>主臂诊断</span>
+                <span id="diag-state" class="normal-case tracking-normal text-[10px] text-gray-600">未连接</span>
+            </div>
+            <div class="diag-head"><span>关节</span><span>原始</span><span>量程</span><span>读数</span></div>
+            <div id="diag"></div>
+            <div id="diag-warn" class="hidden mt-2 text-[10px] leading-relaxed" style="color:#fbbf24"></div>
         </div>
 
         <!-- 从臂 -->

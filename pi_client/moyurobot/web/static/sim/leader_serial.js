@@ -194,12 +194,15 @@ export class LeaderSerial {
       const frames = await this._tx(pktRead(id, REG.MIN_POS, 4), 1, 40).catch(() => []);
       const f = frames[0];
       if (!f || f.data.length < 4) {
-        this.limits.set(id, { min: 0, max: MAX_RES, mid: MAX_RES / 2, fallback: true });
+        this.limits.set(id, { min: 0, max: MAX_RES, mid: MAX_RES / 2, fallback: true, uncalibrated: true });
         continue;
       }
       const min = (f.data[1] << 8) | f.data[0];
       const max = (f.data[3] << 8) | f.data[2];
-      this.limits.set(id, { min, max, mid: (min + max) / 2, fallback: false });
+      // 出厂默认是 0~4095。如果读出来还是这组值，说明这个舵机没被写入过校准
+      // 量程——此时 mid=2047.5 只是个理论中点，跟机械零位没关系，读数会整体偏。
+      const uncalibrated = min === 0 && max === MAX_RES;
+      this.limits.set(id, { min, max, mid: (min + max) / 2, fallback: false, uncalibrated });
     }
     return this.limits;
   }

@@ -359,6 +359,30 @@ export class SimView {
     this._applyPose(this.values);
   }
 
+  /**
+   * 主臂体检：每个关节的原始值、量程、是否校准过、当前换算值
+   * 「量程 = 0~4095」= 出厂默认 = 没校准过，此时零点没有物理意义
+   */
+  getDiagnostics() {
+    return JOINTS.map((joint) => {
+      const lim = this.leader.limits.get(joint.id) || {};
+      const raw = this.lastRaw?.get(joint.id);
+      return {
+        key: joint.key,
+        label: joint.label,
+        id: joint.id,
+        raw,
+        min: lim.min,
+        max: lim.max,
+        mid: lim.mid,
+        fallback: !!lim.fallback,
+        uncalibrated: !!lim.uncalibrated,
+        value: raw != null ? this.leader.toLerobot(joint.id, raw, joint.mode) : null,
+        offset: this.offsets[joint.key] || 0,
+      };
+    });
+  }
+
   /** 主臂零点微调（单位与滑块一致：度；夹爪是 0-100 的单位） */
   setOffset(key, value) {
     this.offsets[key] = Number(value) || 0;
@@ -396,6 +420,16 @@ export class SimView {
     await this.leader.connect(JOINTS.map((j) => j.id));
     this.leaderOn = true;
     this.stats = { frames: 0, t0: performance.now(), errors: 0, hz: 0, rtt: 0, clamped: 0 };
+
+    const raw = JOINTS.filter((j) => this.leader.limits.get(j.id)?.uncalibrated);
+    if (raw.length) {
+      const names = raw.map((j) => `${j.label}(ID${j.id})`).join("、");
+      this.opts.onLeaderWarn?.(
+        `${names} 的量程还是出厂默认 0~4095，说明主臂没做过 lerobot 校准——` +
+        `零点对不上是必然的，靠软件偏移只能压住一部分`
+      );
+    }
+
     this.opts.onLeaderState?.(true);
     this._leaderLoop();
     return this.leader.limits;
@@ -416,6 +450,7 @@ export class SimView {
     if (!this.leaderOn || this.disposed) return;
     try {
       const raw = await this.leader.readPositions();
+      this.lastRaw = raw;
       let clamped = 0;
       for (const joint of JOINTS) {
         let v = this.leader.toLerobot(joint.id, raw.get(joint.id), joint.mode);
