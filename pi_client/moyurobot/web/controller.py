@@ -159,6 +159,18 @@ def setup_routes():
         response.set_cookie(SESSION_COOKIE_NAME, user_id, **cookie_options())
         return response
 
+    @app.route('/sim', methods=['GET'])
+    def sim():
+        """机械臂仿真页 - 只读可视化 + 主臂 Web Serial 联动，不占用排队席位
+
+        往从臂推指令同样走 /control，所以真要让从臂动，仍然需要在控制台拿到
+        控制权并启用运动控制。
+        """
+        username = request.cookies.get(USERNAME_COOKIE_NAME)
+        if not username:
+            return redirect(url_for('login'))
+        return make_response(render_template('sim.html'))
+
     @app.route('/wait', methods=['GET'])
     def wait():
         """等待页面 - 显示排队信息"""

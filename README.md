@@ -334,6 +334,34 @@ curl -i https://lerobot.mycodebro.cn/ChC4AVj1oJ.txt
 
 > 换域名或平台重新下发文件时，只需替换 `public/` 里的文件；路由是通配的，不绑定具体文件名。
 
+## 🦾 机械臂仿真（/sim）
+
+打开 `http://<机器人IP>:8080/sim`（或控制台「机械臂控制」标题右侧的「仿真」按钮），
+可以在浏览器里看到一个 SO-ARM100 的三维模型，和真臂同姿态。
+
+三种驱动方式，优先级从高到低：
+
+| 来源 | 说明 |
+| --- | --- |
+| **主臂（USB）** | 点「连接主臂」→ 选中主臂串口。主臂扭矩会自动松开，用手带动它，仿真跟手，同时推给从臂 |
+| **滑块** | 没连主臂时手动拖；连上主臂后滑块变只读，跟随主臂显示 |
+| **真臂回读** | 点「把真臂姿态读回仿真」，把实物的当前姿态同步到画面 |
+
+几个实现要点：
+
+- **浏览器直连舵机**，不需要在那台电脑上装 Python 或 lerobot。用 Web Serial + Feetech 协议
+  直接读 `Present_Position`，一次广播包读回 6 个关节（SYNC READ）。
+- 角度口径与 lerobot 一致：连上时读一次 `Min_Position_Limit` / `Max_Position_Limit`，
+  用 `(raw - mid) * 360 / 4095` 归一化，所以**校准过的主臂也能直接对上**。
+- 只支持 **Chrome / Edge**（Web Serial 限制），且必须是 `https://` 或 `localhost`。
+- 串口同一时刻只能被一方占用：主臂插在浏览器那台电脑上时，那边就不能同时用 lerobot。
+- 推送到从臂仍然走 `/control`，所以要先在控制台启用运动控制，且服务端
+  `arm_servo_speed` 建议设为 1.0，否则从臂跟不上手。
+
+仿真资源（three.js、urdf-loader、SO-101 的 URDF 与网格）都放在
+`pi_client/moyurobot/web/static/sim/`，离线可用，不依赖 CDN。
+其中 three.js / urdf-loader / SO-101 模型来自 [bambot](https://github.com/timqian/bambot)（MIT）。
+
 ## 🐛 故障排除
 
 ### 机器人连接失败
