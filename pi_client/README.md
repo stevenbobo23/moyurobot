@@ -14,6 +14,10 @@ vim .env
 
 # 启动服务
 ./scripts/start_all.sh
+
+# 只起 Web（二选一）
+./scripts/start_web_https.sh   # https://<本机IP>:8443，证书自动生成（默认）
+./scripts/start_web_http.sh    # http://<本机IP>:8080，给 nginx/frp 终止 TLS 用
 ```
 
 ## 目录结构
@@ -37,7 +41,8 @@ pi_client/
 
 | 服务 | 端口 | 说明 |
 |------|------|------|
-| Web 控制器 | 8080 | HTTP 控制界面 |
+| Web 控制器 | 8443 | HTTPS 控制界面（`start_web_https.sh`，推荐） |
+| Web 控制器 | 8080 | HTTP 控制界面（`start_web_http.sh`，TLS 在反代终止时用） |
 | MCP HTTP | 8000 | AI 控制接口 |
 | 语音对讲 | 8081 | 音频 WebSocket（监听车端声音 / 按住说话） |
 

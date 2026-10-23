@@ -37,7 +37,7 @@
 ```bash
 cd ~/moyurobot && git pull
 cd pi_client
-./scripts/start_web.sh          # 默认 https://192.168.0.184:8443，证书自动生成
+./scripts/start_web_https.sh    # 默认 https://192.168.0.184:8443，证书自动生成
 ```
 
 ### 2.2 frpc.ini（改动只有一处：local_port 8080 → 8443）
@@ -199,7 +199,7 @@ curl -s https://lerobot.mycodebro.cn/audio/info | python3 -m json.tool | grep -E
 Pi 上：
 
 ```bash
-WEB_HTTPS=0 WEB_PORT=8080 ./scripts/start_web.sh
+./scripts/start_web_http.sh
 ```
 
 frpc.ini **完全不用改**（还是你原来那份 8080 → 8003、8081 → 8004）。
@@ -232,7 +232,7 @@ location / {
 | `/video_feed` 一直转圈、画面不出来 | nginx 默认缓冲整个 MJPEG 流 | `proxy_buffering off` |
 | 语音面板「未连接」 | `/audio` 路径被改写，或 `Upgrade` 头丢了 | 见 2.4 的两条注意 |
 | 音频提示「未登录」 | 跨域 Cookie 带不过去 | 项目已改用 `?token=` 连接令牌，确认前端不是缓存的旧 JS |
-| 换网段后浏览器报证书错误 | 自签证书 SAN 里没有新 IP | `WEB_REGENERATE_CERT=1 ./scripts/start_web.sh` |
+| 换网段后浏览器报证书错误 | 自签证书 SAN 里没有新 IP | `WEB_REGENERATE_CERT=1 ./scripts/start_web_https.sh` |
 | frpc 连上但公网端口不通 | frps `allow_ports` 没放开 | 加 `8003,8004` 并重启 frps |
 
 ## 5. 局域网 https 直连时的一个已知限制

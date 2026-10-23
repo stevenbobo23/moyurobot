@@ -159,6 +159,8 @@ start_web_controller() {
     log_info "机器人ID: $ROBOT_ID"
     log_info "Web 端口: 8080 | MCP HTTP 端口: 8000"
     log_info "两个服务共享同一个机器人连接（避免资源冲突）"
+    log_warn "本脚本固定 HTTP 8080：局域网直连时 /sim 的 Web Serial 不可用（非安全上下文）"
+    log_warn "需要 HTTPS 请用 ./scripts/start_web_https.sh，但它独占机器人，别和本脚本同时跑"
     
     # 记录日志（启动前先做一次大小轮转）
     LOG_FILE_PATH="$LOG_DIR/moyurobot_web.log"

@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Web 控制器启动脚本（默认 HTTPS + 自签证书，一次到位）
+# Web 控制器启动脚本 —— 底层实现，日常请直接用下面两个入口：
 #
-#   ./scripts/start_web.sh                             # 默认 https://<本机IP>:8443
-#   sudo -E WEB_PORT=443 ./scripts/start_web.sh        # 想用 443（无需端口号）
-#   WEB_HTTPS=0 WEB_PORT=8080 ./scripts/start_web.sh   # 退回纯 HTTP
-#   ./scripts/start_web.sh --enable-stream             # 其余参数原样透传
+#   ./scripts/start_web_https.sh   # https://<本机IP>:8443（自签证书，默认）
+#   ./scripts/start_web_http.sh    # http://<本机IP>:8080（旧端口，给反代终止 TLS）
+#
+# 直接调本脚本也等价于 https 入口，下面的环境变量可用于临时覆盖：
+#
+#   sudo -E WEB_PORT=443 ./scripts/start_web_https.sh      # 想用 443（无需端口号）
+#   WEB_HTTPS=0 ./scripts/start_web.sh                     # 临时退回纯 HTTP
+#   ./scripts/start_web_https.sh --enable-stream           # 其余参数原样透传
 #
 # 可用环境变量：
 #   WEB_HOST            监听地址，默认 0.0.0.0
@@ -13,7 +17,7 @@
 #   WEB_HTTPS           auto（默认，有证书就 HTTPS）| 1 强制 | 0 关闭
 #   WEB_SSL_CERT/KEY    证书与私钥，默认 certs/robot.crt / certs/robot.key
 #   WEB_REGENERATE_CERT 1 = 证书 SAN 不含当前 IP 时自动重签
-#   PYTHON              解释器，默认 python（conda 环境请显式指定）
+#   PYTHON              解释器，默认按 conda 环境 / python3 自动挑选
 #   ROBOT_ID / WEB_PASSWORD  同原脚本
 #
 # 为什么默认开 HTTPS：Web Serial、麦克风、crypto.subtle 都是 secure context
@@ -105,7 +109,7 @@ if [ "$USE_HTTPS" = "1" ]; then
         if [ "${WEB_REGENERATE_CERT:-0}" = "1" ]; then
             gen_cert
         else
-            echo "   重签：WEB_REGENERATE_CERT=1 ./scripts/start_web.sh"
+            echo "   重签：WEB_REGENERATE_CERT=1 ./scripts/start_web_https.sh"
         fi
     fi
 
@@ -130,7 +134,7 @@ if command -v ss >/dev/null 2>&1; then
     fi
 fi
 if [ "${WEB_PORT}" -lt 1024 ] && [ "$(id -u)" -ne 0 ]; then
-    echo "❌ 端口 ${WEB_PORT} < 1024 需要 root 权限：sudo -E ./scripts/start_web.sh"
+    echo "❌ 端口 ${WEB_PORT} < 1024 需要 root 权限：sudo -E ./scripts/start_web_https.sh"
     exit 1
 fi
 
