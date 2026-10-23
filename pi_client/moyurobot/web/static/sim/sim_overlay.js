@@ -52,9 +52,15 @@ function writePageValues(values) {
 }
 
 // ---------------------------------------------------------------- 推送
+/**
+ * 是否把角度下发到真臂。默认开——主臂接管时从臂必须跟手。
+ * 关掉就是「排练模式」：只驱动仿真，不动真车。
+ */
+let pushEnabled = true;
+
 /** 只保留最新一帧：网络抖动不会积压成越来越大的延迟 */
 function pushToArm(values) {
-  if (!window.__simPushEnabled) return;
+  if (!pushEnabled) return;
   pending = { ...values };
   if (!flushing) flush();
 }
@@ -322,6 +328,12 @@ document.addEventListener("visibilitychange", () => {
   if (!view) return;
   view.setPaused(document.hidden || panel?.dataset.open !== "1");
 });
+
+window.setSimPushEnabled = (v) => {
+  pushEnabled = !!v;
+  setStatus(pushEnabled ? "已开启下发真臂" : "排练模式（只驱动仿真）", "idle");
+};
+window.isSimPushEnabled = () => pushEnabled;
 
 window.openSimWindow = openSimWindow;
 window.closeSimWindow = closeSimWindow;
