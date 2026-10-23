@@ -329,6 +329,18 @@ document.addEventListener("visibilitychange", () => {
   view.setPaused(document.hidden || panel?.dataset.open !== "1");
 });
 
+/**
+ * 主臂零点微调（在控制台里临时调，值会存到 localStorage，和 /sim 页共用）
+ *   setSimOffset('arm_wrist_roll.pos', 8)
+ *   setSimOffset('arm_wrist_roll.pos', 0)   // 归零
+ */
+window.setSimOffset = (key, deg) => {
+  if (!view) return;
+  view.setOffset(key, deg);
+  setStatus(`${key} 偏移 ${Number(deg).toFixed(1)}`, "idle");
+};
+window.getSimOffsets = () => (view ? view.getOffsets() : {});
+
 window.setSimPushEnabled = (v) => {
   pushEnabled = !!v;
   setStatus(pushEnabled ? "已开启下发真臂" : "排练模式（只驱动仿真）", "idle");

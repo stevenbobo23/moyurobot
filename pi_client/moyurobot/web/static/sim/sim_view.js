@@ -34,6 +34,7 @@ const MODEL_BASES = {
 };
 
 const NEUTRAL_DEG = 180;
+const OFFSET_KEY = "moyurobot.sim.offsets";
 
 function pickModelBase() {
   if (window.SIM_MODEL_BASE) return window.SIM_MODEL_BASE;
@@ -61,6 +62,12 @@ export class SimView {
 
     this.values = Object.fromEntries(JOINTS.map((j) => [j.key, 0]));
     this.invert = {};
+    // 主臂零点微调：装配错齿、量程不对称导致「主臂在 0、从臂不在 0」时，
+    // 在这里补一个常数偏移。正值 = 把这个关节往正方向掰。
+    this.offsets = {};
+    try {
+      Object.assign(this.offsets, JSON.parse(localStorage.getItem(OFFSET_KEY) || "{}"));
+    } catch { /* 忽略坏数据 */ }
     this.jointLimits = {};
     this.robot = null;
     this.fittedOnce = false;
@@ -352,6 +359,27 @@ export class SimView {
     this._applyPose(this.values);
   }
 
+  /** 主臂零点微调（单位与滑块一致：度；夹爪是 0-100 的单位） */
+  setOffset(key, value) {
+    this.offsets[key] = Number(value) || 0;
+    this._saveOffsets();
+  }
+
+  getOffsets() {
+    return { ...this.offsets };
+  }
+
+  clearOffsets() {
+    this.offsets = {};
+    this._saveOffsets();
+  }
+
+  _saveOffsets() {
+    try {
+      localStorage.setItem(OFFSET_KEY, JSON.stringify(this.offsets));
+    } catch { /* 忽略 */ }
+  }
+
   resetView() {
     this.fitLocked = false;
     this.fittedOnce = false;
@@ -390,8 +418,9 @@ export class SimView {
       const raw = await this.leader.readPositions();
       let clamped = 0;
       for (const joint of JOINTS) {
-        const v = this.leader.toLerobot(joint.id, raw.get(joint.id), joint.mode);
+        let v = this.leader.toLerobot(joint.id, raw.get(joint.id), joint.mode);
         if (v == null) continue;
+        v += this.offsets[joint.key] || 0; // 零点微调
         // 主臂能读到 ±180°，但滑块行程只有 ±100 这一档，超出就夹住
         const c = clamp(v, joint.min, joint.max);
         if (Math.abs(c - v) > 0.5) clamped++;

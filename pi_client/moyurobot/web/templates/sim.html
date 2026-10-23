@@ -60,6 +60,19 @@
         }
         .joint-invert.on { border-color: #0ea5e9; color: #38bdf8; background: rgba(14, 165, 233, .12); }
 
+        .offset-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+        .offset-name { font-size: 11px; color: #9ca3af; flex: 1; }
+        .offset-val {
+            font-family: ui-monospace, Menlo, monospace; font-size: 11px;
+            color: #38bdf8; min-width: 40px; text-align: right;
+        }
+        .offset-row button {
+            width: 22px; height: 20px; line-height: 1; font-size: 12px;
+            border: 1px solid #374151; border-radius: 4px; background: transparent;
+            color: #9ca3af; cursor: pointer; padding: 0;
+        }
+        .offset-row button:hover { border-color: #0ea5e9; color: #38bdf8; }
+
         input[type=range] { width: 100%; height: 3px; -webkit-appearance: none; appearance: none;
             background: #1f2937; border-radius: 2px; outline: none; }
         input[type=range]::-webkit-slider-thumb {
@@ -141,6 +154,20 @@
                 <button id="btn-home" class="normal-case tracking-normal text-[10px] text-gray-500 hover:text-tech-400">归位</button>
             </div>
             <div id="sliders"></div>
+        </div>
+
+        <!-- 主臂零点微调 -->
+        <div class="panel-section">
+            <div class="panel-title">
+                <span>主臂零点微调</span>
+                <button id="btn-clear-offsets"
+                    class="normal-case tracking-normal text-[10px] text-gray-500 hover:text-tech-400">全部归零</button>
+            </div>
+            <div id="offsets"></div>
+            <div class="text-[10px] text-gray-600 mt-1 leading-relaxed">
+                主臂松手、摆到你认为的 0 位，哪个关节对不上就调哪个。点一下 ±1，按住 Shift 点 ±10。
+                只影响主臂读数，不影响手动滑块。
+            </div>
         </div>
 
         <!-- 从臂 -->

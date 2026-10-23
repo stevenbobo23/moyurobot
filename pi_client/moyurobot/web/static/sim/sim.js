@@ -94,6 +94,8 @@ const view = new SimView($("viewer"), {
   },
 });
 
+window.__simView = view; // 调试用
+
 // ---------------------------------------------------------------- 推送
 let pending = null;
 let flushing = false;
@@ -192,6 +194,43 @@ function refreshSliderUI() {
   }
 }
 
+// ---------------------------------------------------------------- 零点微调
+function buildOffsets() {
+  const host = $("offsets");
+  host.innerHTML = "";
+  for (const joint of JOINTS) {
+    const row = document.createElement("div");
+    row.className = "offset-row";
+    row.innerHTML = `
+      <span class="offset-name">${joint.label}</span>
+      <button data-dir="-1" title="−1（Shift 为 −10）">−</button>
+      <span class="offset-val" data-o="${joint.key}">0.0</span>
+      <button data-dir="1" title="+1（Shift 为 +10）">+</button>
+    `;
+    const valEl = row.querySelector("[data-o]");
+    const paint = () => {
+      const v = view.getOffsets()[joint.key] || 0;
+      valEl.textContent = v.toFixed(1);
+      valEl.style.color = Math.abs(v) > 0.05 ? "#fbbf24" : "#38bdf8";
+    };
+    row.querySelectorAll("button").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        const step = (e.shiftKey ? 10 : 1) * Number(btn.dataset.dir);
+        const cur = view.getOffsets()[joint.key] || 0;
+        view.setOffset(joint.key, Math.round((cur + step) * 10) / 10);
+        paint();
+      });
+    });
+    paint();
+    host.appendChild(row);
+  }
+}
+
+$("btn-clear-offsets").addEventListener("click", () => {
+  view.clearOffsets();
+  buildOffsets();
+});
+
 // ---------------------------------------------------------------- 绑定
 $("btn-leader").addEventListener("click", async () => {
   const btn = $("btn-leader");
@@ -253,6 +292,7 @@ $("btn-read-follower").addEventListener("click", async () => {
 // ---------------------------------------------------------------- 启动
 loadPrefs();
 buildSliders();
+buildOffsets();
 view.setInvert(state.invert);
 $("push-toggle").checked = state.pushEnabled;
 setPushState(state.pushEnabled ? "待推送" : "已暂停", "idle");
