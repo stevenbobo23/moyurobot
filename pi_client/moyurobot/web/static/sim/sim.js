@@ -515,8 +515,8 @@ function buildSliders() {
     input.addEventListener("input", () => {
       if (state.leaderConnected) return; // 主臂接管时不接受滑块
       state.values[joint.key] = parseFloat(input.value);
-      valEl.textContent = state.values[joint.key].toFixed(1);
       applyToRobot();
+      refreshSliderUI(); // 顺带刷新「是否被模型限位夹住」的标记
       schedulePush();
     });
 
@@ -542,6 +542,15 @@ function refreshSliderUI() {
     el.valEl.textContent = v.toFixed(1);
     el.input.value = String(Math.min(joint.max, Math.max(joint.min, v)));
     el.input.disabled = state.leaderConnected;
+
+    // 指令值和 URDF 能表达的角度不完全一致：肘关节 +100、夹爪 -10 都超出模型限位，
+    // 会被夹住。这里把被夹住的关节标黄，免得「拖到 100 但模型不动」看着像 bug。
+    const effDeg = (toSimRad(joint, v) * 180) / Math.PI;
+    const clamped = Math.abs(effDeg - (180 + v)) > 0.5;
+    el.valEl.dataset.clamped = clamped ? "1" : "0";
+    el.valEl.title = clamped
+      ? `模型限位只到 ${effDeg.toFixed(1)}°（对应指令值 ${(effDeg - 180).toFixed(1)}）`
+      : "";
   }
 }
 
