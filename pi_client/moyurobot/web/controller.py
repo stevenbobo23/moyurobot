@@ -15,6 +15,7 @@ import logging
 import time
 import sys
 import os
+import ssl
 import threading
 import uuid
 
@@ -572,6 +573,70 @@ def setup_routes():
         })
 
 
+def _build_ssl_context(cert_path: str, key_path: str) -> ssl.SSLContext:
+    """构建 HTTPS 用的 SSLContext
+
+    两件事同时处理：
+
+    1. **truststore 污染**（``NoneType.get_unverified_chain`` 的真凶）。
+       有些环境（pip-system-certs、某些发行版的 sitecustomize、容器镜像）会
+       调用 ``truststore.inject_into_ssl()``，把 ``ssl.SSLContext`` 整体换成
+       truststore 的包装类。那个类是在**客户端**场景设计的：握手完要去校验
+       对端证书链，而服务端根本没有对端证书，内部一路取到 None，最后爆在
+       ``sslobj.get_unverified_chain()`` —— 就是
+       ``'NoneType' object has no attribute 'get_unverified_chain'``。
+       这里临时 ``extract_from_ssl()`` 拿回标准库实现建好上下文，建完立刻再
+       ``inject_into_ssl()``，让进程里其它客户端（requests/urllib3）继续吃
+       系统信任库。
+
+    2. **不走 werkzeug 的元组路径**。传 ``(cert, key)`` 时 werkzeug 会自己
+       wrap 一层 ``_SSLContext`` 子类接管 wrap_socket；直接给 SSLContext 实例
+       走的是标准库路径，少一层变数。
+    """
+    log = logger or logging.getLogger(__name__)
+
+    for label, path in (("证书", cert_path), ("私钥", key_path)):
+        if not path:
+            raise ValueError(f"{label}路径为空")
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"{label}文件不存在: {path}")
+
+    # truststore 是否把 ssl.SSLContext 换掉了
+    injected = None
+    if getattr(ssl.SSLContext, "__module__", "").split(".")[0] == "truststore":
+        try:
+            import truststore
+
+            truststore.extract_from_ssl()
+            injected = truststore
+            log.warning("检测到 truststore 注入了 ssl.SSLContext，已为服务端临时切回标准库实现")
+        except Exception as e:  # noqa: BLE001
+            log.warning("truststore 已注入但无法临时还原（%s），HTTPS 可能仍会失败", e)
+
+    try:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        ctx.load_cert_chain(cert_path, key_path)
+    finally:
+        if injected is not None:
+            try:
+                injected.inject_into_ssl()  # 客户端继续用系统信任库
+            except Exception as e:  # noqa: BLE001
+                log.warning("恢复 truststore 注入失败（客户端证书校验可能退回系统默认）: %s", e)
+
+    # 把 SAN 和有效期打出来：局域网访问提示证书不受信任，十次有九次是
+    # 访问用的 IP 不在 SAN 里（脚本按 IP 生成，换了 IP 就得重新签）
+    try:
+        info = ssl._ssl._test_decode_cert(cert_path)  # noqa: SLF001 私有 API，解不出来不影响启动
+        san = [v for k, v in info.get("subjectAltName", ()) if k in ("DNS", "IP Address")]
+        log.info("HTTPS 证书 SAN: %s", ", ".join(san) or "(空，浏览器会校验证书失败)")
+        log.info("HTTPS 证书有效期: %s ~ %s", info.get("notBefore"), info.get("notAfter"))
+    except Exception as e:  # noqa: BLE001
+        log.debug("证书信息解析失败（不影响启动）: %s", e)
+
+    return ctx
+
+
 def run_server(host="0.0.0.0", port=8080, robot_id="my_awesome_kiwi", mcp_mode=None, mcp_port=8000,
                audio_enabled=True, audio_port=None, ssl_cert=None, ssl_key=None,
                greeting_enabled=True):
@@ -696,8 +761,14 @@ def run_server(host="0.0.0.0", port=8080, robot_id="my_awesome_kiwi", mcp_mode=N
     # 定义Flask运行函数
     ssl_context = None
     if ssl_cert and ssl_key:
-        ssl_context = (ssl_cert, ssl_key)
-        logger.info("HTTPS 已启用（浏览器可在非 localhost 环境申请麦克风权限）")
+        try:
+            ssl_context = _build_ssl_context(ssl_cert, ssl_key)
+            logger.info("HTTPS 已启用（Web Serial / 麦克风等需要安全上下文的能力可用）")
+        except Exception:
+            # 证书坏了不该连控制台一起打不开：降级回 HTTP，但把原因打全
+            logger.exception("加载证书失败，降级为 HTTP 启动")
+            logger.warning("HTTP 模式下 Web Serial、麦克风、剪贴板等 API 会被浏览器屏蔽")
+            ssl_context = None
     
     def run_flask():
         try:
@@ -709,8 +780,8 @@ def run_server(host="0.0.0.0", port=8080, robot_id="my_awesome_kiwi", mcp_mode=N
                 use_reloader=False,
                 ssl_context=ssl_context
             )
-        except Exception as e:
-            logger.error(f"HTTP服务启动失败: {e}")
+        except Exception:
+            logger.exception("HTTP服务启动失败")
 
     try:
         if mcp_mode and mcp:
