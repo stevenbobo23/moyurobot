@@ -21,8 +21,9 @@ window.__simBooted = true;
 // ---------------------------------------------------------------- 关节定义
 // 肩部垂直 / 肘关节放宽到 ±80（实测 URDF 允许 Pitch ±100、Elbow -100~+90，
 // 仍在物理范围内）；其余与 templates/index.html 的滑块保持一致。
-// 注意：index.html 和 actions.py 里这两个关节仍是旧的 ±55/±50，只影响那两处
-// 的 UI 与预设动作，不影响本页 clamp 与下发。
+// index.html 滑块、actions.py 预设动作、gesture_control.js 已同步为 ±80；
+// MCP（mcp/server.py）的 min_safe/max_safe 仍固定 ±50，是给 AI 控制留的
+// 更保守一层，不受这里影响。
 const JOINTS = [
   { key: "arm_shoulder_pan.pos", urdf: "Rotation",    id: 1, min: -60, max: 60, label: "肩部水平" },
   { key: "arm_shoulder_lift.pos", urdf: "Pitch",      id: 2, min: -80, max: 80, label: "肩部垂直" },
